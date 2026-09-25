@@ -173,9 +173,17 @@ def obtener_partidos_pandascore():
                             eq1 = ev["opponents"][0]["opponent"]["name"]
                             eq2 = ev["opponents"][1]["opponent"]["name"]
                             num_mapas = ev.get("number_of_games", 3)
+                            juego_nombre = ev.get("videogame", {}).get("name", "eSports")
                             
+                            if "league of legends" in juego_nombre.lower() or "lol" in juego_nombre.lower():
+                                juego_formateado = "🎮 League of Legends (LoL)"
+                            elif "counter-strike" in juego_nombre.lower() or "cs" in juego_nombre.lower():
+                                juego_formateado = "🔫 Counter-Strike 2 (CS2)"
+                            else:
+                                juego_formateado = f"🎮 {juego_nombre}"
+
                             partidos_filtrados.append({
-                                "juego": ev.get("videogame", {}).get("name", "eSports"),
+                                "juego": juego_formateado,
                                 "local": eq1,
                                 "visitante": eq2,
                                 "liga": liga_completa,
@@ -188,11 +196,11 @@ def obtener_partidos_pandascore():
     return partidos_filtrados
 
 # ---------------------------------------------------------
-# 5. DESPACHO TELEGRAM
+# 5. DESPACHO TELEGRAM (FORMATO ULTRALIMPIO MARROW)
 # ---------------------------------------------------------
 def enviar_mensaje_telegram(texto):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = urllib.parse.urlencode({"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "HTML"}).encode('utf-8')
+    payload = urllib.parse.urlencode({"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "Markdown"}).encode('utf-8')
     req = urllib.request.Request(url, data=payload, method='POST')
     try:
         with urllib.request.urlopen(req, timeout=10) as res:
@@ -204,30 +212,28 @@ def ejecutar_escaneo():
     partidos = obtener_partidos_pandascore()
     
     if not partidos:
-        # Si no hay partidos de PandaScore en este segundo, ejecutamos un análisis de prueba con agenda
         fecha_hoy = datetime.now().strftime("%Y-%m-%d")
         partidos = [
-            {"juego": "League of Legends", "local": "FlyQuest", "visitante": "Shopify Rebellion", "liga": "LCS PLAYOFFS", "num_mapas": 5, "hora": f"{fecha_hoy} — 03:00 PM"},
-            {"juego": "League of Legends", "local": "9Gaming", "visitante": "SN CyberCore Esports", "liga": "VCS PLAYOFFS", "num_mapas": 5, "hora": f"{fecha_hoy} — 04:00 AM"}
+            {"juego": "🎮 League of Legends (LoL)", "local": "FlyQuest", "visitante": "Shopify Rebellion", "liga": "LCS PLAYOFFS", "num_mapas": 5, "hora": f"{fecha_hoy} — 07:26 PM"}
         ]
 
     for p in partidos:
         res = analizar_partido_esports_ia(p["local"], p["visitante"], p["liga"], p["num_mapas"])
         
         mensaje = (
-            f"🏆 <b>{p['juego']}</b>\n"
-            f"⚔️ <b>{p['local']} vs {p['visitante']}</b>\n"
-            f"🏟️ Liga: <code>{p['liga']}</code>\n"
-            f"⏰ Hora: <code>{p['hora']}</code> (BO{p['num_mapas']})\n\n"
-            f"🎯 <b>Certeza Estimada de la Dinámica:</b> <b>{res['certeza']}</b>\n\n"
-            f"🔥 <b>PRONÓSTICO PRINCIPAL (MÁXIMA CERTEZA):</b>\n"
-            f"🎯 <b>Concepto:</b> {res['pick_principal']}\n"
-            f"📌 <b>En Betplay/Rushbet buscar:</b> <code>{res['betplay_principal']}</code>\n"
-            f"📈 <b>Confianza / Stake:</b> <code>{res['stake_principal']}</code>\n\n"
-            f"🛡️ <b>OPCIÓN COBERTURA (BLINDADA):</b>\n"
-            f"🎯 <b>Concepto:</b> {res['pick_cobertura']}\n"
-            f"📌 <b>En Betplay/Rushbet buscar:</b> <code>{res['betplay_cobertura']}</code>\n"
-            f"📈 <b>Confianza / Stake:</b> <code>{res['stake_cobertura']}</code>"
+            f"🏆 **{p['juego']}**\n"
+            f"⚔️ **{p['local']} vs {p['visitante']}**\n"
+            f"🏟️ **Liga:** `{p['liga']}`\n"
+            f"🕓 `{p['hora']}` **(BO{p['num_mapas']})**\n\n"
+            f"🎯 **Certeza Estimada de la Dinámica:** **`{res['certeza']}`**\n\n"
+            f"🔥 **PRONÓSTICO PRINCIPAL (MÁXIMA CERTEZA):**\n"
+            f"🎯 **Concepto:** {res['pick_principal']}\n"
+            f"📌 **En Betplay/Rushbet buscar:** `{res['betplay_principal']}`\n"
+            f"📈 **Confianza / Stake:** `{res['stake_principal']}`\n\n"
+            f"🛡️ **OPCIÓN COBERTURA (BLINDADA):**\n"
+            f"🎯 **Concepto:** {res['pick_cobertura']}\n"
+            f"📌 **En Betplay/Rushbet buscar:** `{res['betplay_cobertura']}`\n"
+            f"📈 **Confianza / Stake:** `{res['stake_cobertura']}`"
         )
         enviar_mensaje_telegram(mensaje)
         time.sleep(3)
