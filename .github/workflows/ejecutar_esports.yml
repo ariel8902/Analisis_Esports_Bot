@@ -1,0 +1,33 @@
+name: Ejecutar Bot Esports Prepartido
+
+on:
+  schedule:
+    - cron: '0 11 * * *'  # Se ejecuta diariamente a las 06:00 AM hora Colombia
+  workflow_dispatch:       # Permite ejecución manual con un clic
+
+jobs:
+  analisis:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Descargar código fuente
+      uses: actions/checkout@v3
+
+    - name: Configurar entorno Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Instalar dependencias necesarias
+      run: |
+        python -m pip install --upgrade pip
+        pip install google-genai pydantic
+
+    - name: Ejecutar motor de análisis de eSports
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        PANDASCORE_TOKEN: ${{ secrets.PANDASCORE_TOKEN }}
+        TELEGRAM_TOKEN_ESPORTS: ${{ secrets.TELEGRAM_TOKEN_ESPORTS }}
+        TELEGRAM_CHAT_ID_ESPORTS: ${{ secrets.TELEGRAM_CHAT_ID_ESPORTS }}
+      run: |
+        python analisis_esports_prepartido.py
