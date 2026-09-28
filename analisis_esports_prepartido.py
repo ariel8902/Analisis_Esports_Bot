@@ -42,8 +42,7 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 # ==========================================
 def analizar_con_gemini(prompt):
     """
-    Evalúa el análisis usando el modelo 'gemini-2.5-flash'.
-    Maneja reintentos automáticos si los servidores están ocupados (503).
+    Evaluación usando el modelo recomendado por la API en tu consola.
     """
     max_intentos = 3
     for intento in range(max_intentos):
