@@ -5,27 +5,71 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from google import genai
 
-# 1. Configuración de zona horaria e impresión de diagnóstico
+# ==========================================
+# 1. FECHA Y ZONA HORARIA (COLOMBIA)
+# ==========================================
 tz_colombia = ZoneInfo("America/Bogota")
-fecha_hora_actual = datetime.now(tz_colombia).strftime('%Y-%m-%d %H:%M:%S')
+fecha_hoy_colombia = datetime.now(tz_colombia).strftime('%Y-%m-%d')
 
-print("=== PRUEBA DE DIAGNÓSTICO DE BOT ESPORTS ===")
-print(f"Fecha y Hora actual (Colombia): {fecha_hora_actual}")
+print("--- INICIANDO ESCANEO DE ESPORTS ---")
+print(f"Fecha local (Colombia): {fecha_hoy_colombia}")
 
-# 2. Carga de Variables de Entorno
+# ==========================================
+# 2. CARGA Y VALIDACIÓN DE VARIABLES DE ENTORNO
+# ==========================================
 PANDASCORE_TOKEN = os.getenv("PANDASCORE_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN_ESPORTS")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID_ESPORTS")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-print(f"Token Telegram detectado: {'SI' if TELEGRAM_TOKEN else 'NO'}")
-print(f"Chat ID Telegram detectado: {'SI' if TELEGRAM_CHAT_ID else 'NO'}")
-print(f"Gemini API Key detectada: {'SI' if GEMINI_API_KEY else 'NO'}")
+if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    print("Error: Credenciales de Telegram eSports no configuradas.")
+else:
+    print("Credenciales de Telegram cargadas correctamente.")
 
-# 3. Función de prueba para enviar a Telegram
-def enviar_prueba_telegram(mensaje):
+if not GEMINI_API_KEY:
+    print("Error: GEMINI_API_KEY no configurada.")
+
+if not PANDASCORE_TOKEN:
+    print("Error: PANDASCORE_TOKEN no configurada.")
+
+# Inicializar cliente Gemini
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+
+# ==========================================
+# 3. EVALUACIÓN CON GEMINI
+# ==========================================
+def analizar_con_gemini(prompt):
+    """
+    Evalúa el análisis usando el modelo 'gemini-2.5-flash'.
+    Maneja reintentos automáticos si los servidores están ocupados (503).
+    """
+    max_intentos = 3
+    for intento in range(max_intentos):
+        try:
+            respuesta = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+            if respuesta and respuesta.text:
+                return respuesta.text
+        except Exception as e:
+            if "503" in str(e) and intento < max_intentos - 1:
+                print(f"Gemini ocupado (503). Reintentando en 5s... (Intento {intento + 1}/{max_intentos})")
+                time.sleep(5)
+            else:
+                print(f"Error evaluando partido con Gemini: {e}")
+                return None
+    return None
+
+
+# ==========================================
+# 4. ENVÍO DE NOTIFICACIONES A TELEGRAM
+# ==========================================
+def enviar_mensaje_telegram(mensaje):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("ERROR: No se pueden enviar mensajes porque faltan las credenciales de Telegram.")
+        print("Error: Credenciales de Telegram eSports no configuradas.")
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -36,52 +80,74 @@ def enviar_prueba_telegram(mensaje):
     }
 
     try:
-        res = requests.post(url, json=payload, timeout=10)
-        print(f"Respuesta de Telegram API Status: {res.status_code}")
-        print(f"Respuesta de Telegram Body: {res.text}")
-        return res.status_code == 200
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            print("Mensaje eSports despachado a Telegram. HTTP: 200")
+            return True
+        else:
+            print(f"Error Telegram HTTP {response.status_code}: {response.text}")
+            return False
     except Exception as e:
         print(f"Excepción al conectar con Telegram: {e}")
         return False
 
-# 4. Probar generación con Gemini
-def probar_gemini():
-    if not GEMINI_API_KEY:
-        print("ERROR: No hay GEMINI_API_KEY configurada.")
-        return None
 
+# ==========================================
+# 5. CONSULTA DE PARTIDOS EN PANDASCORE
+# ==========================================
+def obtener_partidos_pandascore():
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {PANDASCORE_TOKEN}"
+    }
+    
+    url = "https://api.pandascore.co/matches/upcoming?page[size]=50"
+    
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        
-        # Intentar llamada directa
-        prompt = "Escribe un mensaje de saludo muy corto notificando que el Bot de eSports está en línea."
-        respuesta = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
-        return respuesta.text
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            partidos = res.json()
+            print(f"Partidos obtenidos de PandaScore: {len(partidos)}")
+            return partidos
+        else:
+            print(f"Error al consultar PandaScore. Status: {res.status_code}")
+            return []
     except Exception as e:
-        print(f"Error generando con Gemini: {e}")
-        return None
+        print(f"Error de conexión con PandaScore: {e}")
+        return []
 
+
+# ==========================================
+# 6. FLUJO PRINCIPAL
+# ==========================================
 def main():
-    print("\n--- PASO 1: Generando respuesta de prueba con Gemini ---")
-    texto_gemini = probar_gemini()
+    partidos = obtener_partidos_pandascore()
+    
+    if not partidos:
+        print("No se encontraron partidos programados para analizar.")
+        return
 
-    if texto_gemini:
-        print(f"Respuesta de Gemini generada con éxito:\n{texto_gemini}\n")
-        mensaje_final = f"🧪 *MENSAJE DE PRUEBA DEL BOT DE ESPORTS*\n📅 {fecha_hora_actual}\n\n🤖 *Respuesta de Gemini:*\n{texto_gemini}"
-    else:
-        print("Fallo la generación con Gemini. Se enviará un mensaje simple de plantilla.")
-        mensaje_final = f"🧪 *MENSAJE DE PRUEBA DE CONEXIÓN*\n📅 {fecha_hora_actual}\n\nEl bot de eSports se ha ejecutado correctamente desde GitHub Actions."
+    enviados = 0
+    for partido in partidos:
+        nombre_partido = partido.get("name", "Partido Sin Nombre")
+        liga = partido.get("league", {}).get("name", "Liga Desconocida")
+        
+        prompt = (
+            f"Analiza este partido de eSports y entrega un pronóstico breve para apuestas:\n"
+            f"Evento: {nombre_partido}\n"
+            f"Torneo/Liga: {liga}\n"
+            f"Detalles completos: {partido}"
+        )
+        
+        analisis = analizar_con_gemini(prompt)
+        
+        if analisis:
+            mensaje_final = f"🎮 *ANÁLISIS DE ESPORTS*\n🏆 *{liga}*\n⚔️ {nombre_partido}\n\n{analisis}"
+            if enviar_mensaje_telegram(mensaje_final):
+                enviados += 1
 
-    print("--- PASO 2: Enviando mensaje a Telegram ---")
-    exito = enviar_prueba_telegram(mensaje_final)
+    print(f"Proceso eSports completado. Enviados: {enviados}")
 
-    if exito:
-        print("\n✅ PRUEBA COMPLETADA: El mensaje debió llegar a tu Telegram.")
-    else:
-        print("\n❌ PRUEBA FALLIDA: Ocurrió un problema al entregar el mensaje a Telegram.")
 
 if __name__ == "__main__":
     main()
