@@ -9,7 +9,7 @@ from google import genai
 # 1. FECHA Y ZONA HORARIA (COLOMBIA)
 # ==========================================
 tz_colombia = ZoneInfo("America/Bogota")
-fecha_hoy_colombia = datetime.now(tz_colombia).strftime('%Y-%m-%d')
+fecha_hoy_colombia = datetime.now(tz_colombia).strftime('%Y-%m-%d %H:%M:%S')
 
 print("--- INICIANDO ESCANEO DE ESPORTS ---")
 print(f"Fecha local (Colombia): {fecha_hoy_colombia}")
@@ -27,7 +27,7 @@ if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
 else:
     print("Credenciales de Telegram cargadas correctamente.")
 
-# Inicializar cliente Gemini
+# Inicializar cliente de Gemini con la SDK google-genai
 client = None
 if GEMINI_API_KEY:
     try:
@@ -37,33 +37,26 @@ if GEMINI_API_KEY:
 
 
 # ==========================================
-# 3. EVALUACIÓN CON GEMINI (CON REINTENTOS PARA 503)
+# 3. EVALUACIÓN CON GEMINI (CONTROL DE RITMO GRATUITO)
 # ==========================================
 def analizar_con_gemini(prompt):
     if not client:
         print("Cliente de Gemini no configurado.")
         return None
     
-    modelo_correcto = "gemini-3.8-flash"
-    max_intentos = 3
+    # Modelo actual recomendado para respuestas veloces
+    modelo = "gemini-2.5-flash"
     
-    for intento in range(max_intentos):
-        try:
-            respuesta = client.models.generate_content(
-                model=modelo_correcto,
-                contents=prompt
-            )
-            if respuesta and hasattr(respuesta, 'text') and respuesta.text:
-                print(f"Análisis generado con éxito usando {modelo_correcto}")
-                return respuesta.text
-        except Exception as e:
-            error_str = str(e)
-            if "503" in error_str and intento < max_intentos - 1:
-                print(f"Gemini saturado (503). Reintentando en 4 segundos... (Intento {intento + 1}/{max_intentos})")
-                time.sleep(4)
-            else:
-                print(f"Error con el modelo {modelo_correcto}: {e}")
-                break
+    try:
+        respuesta = client.models.generate_content(
+            model=modelo,
+            contents=prompt
+        )
+        if respuesta and hasattr(respuesta, 'text') and respuesta.text:
+            return respuesta.text
+    except Exception as e:
+        print(f"Error evaluando con Gemini: {e}")
+        return None
 
     return None
 
@@ -132,15 +125,16 @@ def main():
         return
 
     enviados = 0
+    # Procesamos los primeros 5 partidos para no agotar la cuota gratuita
     for partido in partidos[:5]:
         nombre_partido = partido.get("name", "Partido Sin Nombre")
         liga = partido.get("league", {}).get("name", "Liga Desconocida")
         
         prompt = (
-            f"Analiza brevemente este partido de eSports para apuestas de forma concisa:\n"
-            f"Partido: {nombre_partido}\n"
-            f"Torneo/Liga: {liga}\n"
-            f"Indica un favorito probable y un consejo corto."
+            f"Analiza este partido de eSports y dame un pronóstico muy corto y directo para apuestas:\n"
+            f"Evento: {nombre_partido}\n"
+            f"Liga: {liga}\n"
+            f"Dame favorito y consejo breve en 3 líneas."
         )
         
         analisis = analizar_con_gemini(prompt)
@@ -152,7 +146,8 @@ def main():
         
         if enviar_mensaje_telegram(mensaje_final):
             enviados += 1
-            time.sleep(1)
+            # Pausa estricta de 5 segundos entre partidos para garantizar respeto a la cuota gratuita
+            time.sleep(5)
 
     print(f"Proceso eSports completado. Enviados: {enviados}")
 
