@@ -8,7 +8,6 @@ from google import genai
 # ==========================================
 # 1. FECHA Y ZONA HORARIA (COLOMBIA)
 # ==========================================
-# Uso de zoneinfo nativo (Python 3.9+) para evitar errores de librerías faltantes
 tz_colombia = ZoneInfo("America/Bogota")
 fecha_hoy_colombia = datetime.now(tz_colombia).strftime('%Y-%m-%d')
 
@@ -39,7 +38,7 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 # ==========================================
-# 3. EVALUACIÓN CON GEMINI (MANEJO DE ERROR 503)
+# 3. EVALUACIÓN CON GEMINI (MODELO CORREGIDO)
 # ==========================================
 def analizar_con_gemini(prompt):
     """
@@ -48,8 +47,9 @@ def analizar_con_gemini(prompt):
     max_intentos = 3
     for intento in range(max_intentos):
         try:
+            # CORREGIDO: Se usa el modelo estándar 'gemini-1.5-flash' o 'gemini-2.0-flash'
             respuesta = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-1.5-flash",
                 contents=prompt
             )
             return respuesta.text
