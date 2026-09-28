@@ -1,49 +1,61 @@
 import os
 import time
+import requests
+from datetime import datetime
+import pytz
 from google import genai
 
 # ==========================================
-# 1. CONFIGURACIÓN DE VARIABLES DE ENTORNO
+# 1. MANEJO DE FECHA EN ZONA HORARIA COLOMBIA
 # ==========================================
-# Importante: Los nombres coinciden exactamente con los Secrets de GitHub
+# Evita desfases al ejecutarse en GitHub Actions (que corre en UTC)
+tz_colombia = pytz.timezone('America/Bogota')
+fecha_hoy_colombia = datetime.now(tz_colombia).strftime('%Y-%m-%d')
+
+print(f"--- INICIANDO ESCANEO DE ESPORTS ---")
+print(f"Fecha local (Colombia): {fecha_hoy_colombia}")
+
+# ==========================================
+# 2. CARGA Y VALIDACIÓN DE VARIABLES DE ENTORNO
+# ==========================================
 PANDASCORE_TOKEN = os.getenv("PANDASCORE_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN_ESPORTS")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID_ESPORTS")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Validación de credenciales de Telegram
 if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
     print("Error: Credenciales de Telegram eSports no configuradas.")
 else:
     print("Credenciales de Telegram cargadas correctamente.")
 
-# Inicializar cliente de Gemini
+if not GEMINI_API_KEY:
+    print("Error: GEMINI_API_KEY no configurada.")
+
+if not PANDASCORE_TOKEN:
+    print("Error: PANDASCORE_TOKEN no configurada.")
+
+# Inicializar cliente Gemini
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 # ==========================================
-# 2. FUNCIÓN CON REINTENTOS PARA GEMINI (Evita Error 503)
+# 3. EVALUACIÓN CON GEMINI (REINTENTOS CONTRA ERROR 503)
 # ==========================================
-def analizar_partido_con_gemini(prompt_partido):
+def analizar_con_gemini(prompt):
     """
-    Envía la solicitud a Gemini con un bucle de reintentos
-    para absorber el error 503 UNAVAILABLE cuando los servidores estén saturados.
+    Soporta reintentos automáticos ante errores de saturación (503 UNAVAILABLE).
     """
     max_intentos = 3
-    
     for intento in range(max_intentos):
         try:
-            # Reemplaza 'gemini-2.5-flash' por el modelo que estés usando
             respuesta = client.models.generate_content(
                 model="gemini-2.5-flash",
-                contents=prompt_partido
+                contents=prompt
             )
             return respuesta.text
-
         except Exception as e:
-            # Captura el error 503 por alta demanda
             if "503" in str(e) and intento < max_intentos - 1:
-                print(f"Gemini ocupado (503). Reintentando en 5 segundos... (Intento {intento + 1}/{max_intentos})")
+                print(f"Gemini ocupado (503). Reintentando en 5s... (Intento {intento + 1}/{max_intentos})")
                 time.sleep(5)
             else:
                 print(f"Error evaluando partido con Gemini: {e}")
@@ -51,14 +63,12 @@ def analizar_partido_con_gemini(prompt_partido):
 
 
 # ==========================================
-# 3. FUNCIÓN PARA ENVIAR MENSAJES A TELEGRAM
+# 4. ENVÍO DE NOTIFICACIONES A TELEGRAM
 # ==========================================
 def enviar_mensaje_telegram(mensaje):
     """
-    Envía la notificación formateada al chat/canal de Telegram.
+    Envía la respuesta analizada al canal/chat de Telegram.
     """
-    import requests
-
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("Error: Credenciales de Telegram eSports no configuradas.")
         return False
@@ -71,13 +81,12 @@ def enviar_mensaje_telegram(mensaje):
     }
 
     try:
-        response = requests.post(url, json=payload)
-        res_data = response.json()
-        if res_data.get("ok"):
-            print("Mensaje enviado con éxito a Telegram.")
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            print(f"Mensaje eSports despachado a Telegram. HTTP: 200")
             return True
         else:
-            print(f"Error al enviar a Telegram: {res_data.get('description')}")
+            print(f"Error Telegram HTTP {response.status_code}: {response.text}")
             return False
     except Exception as e:
         print(f"Excepción al conectar con Telegram: {e}")
@@ -85,21 +94,68 @@ def enviar_mensaje_telegram(mensaje):
 
 
 # ==========================================
-# 4. LÓGICA PRINCIPAL DEL SCRIPT
+# 5. CONSULTA DE PARTIDOS EN PANDASCORE
+# ==========================================
+def obtener_partidos_pandascore():
+    """
+    Consulta los partidos programados utilizando la API de PandaScore.
+    """
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {PANDASCORE_TOKEN}"
+    }
+    
+    # Consultar partidos en estado 'upcoming' o de la fecha
+    url = f"https://api.pandascore.co/matches/upcoming?page[size]=50"
+    
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            partidos = res.json()
+            print(f"Partidos obtenidos de PandaScore: {len(partidos)}")
+            return partidos
+        else:
+            print(f"Error al consultar PandaScore. Status: {res.status_code}")
+            return []
+    except Exception as e:
+        print(f"Error de conexión con PandaScore: {e}")
+        return []
+
+
+# ==========================================
+# 6. FLUJO PRINCIPAL
 # ==========================================
 def main():
-    print("Iniciando escaneo de eSports...")
+    partidos = obtener_partidos_pandascore()
     
-    # Aquí va tu lógica para obtener partidos de PandaScore
-    # Ejemplo conceptual:
-    # partidos = obtener_partidos_pandascore(PANDASCORE_TOKEN)
-    
-    # Supongamos que recorres cada partido encontrado:
-    # for partido in partidos:
-    #     prompt = f"Analiza este partido: {partido}"
-    #     analisis = analizar_partido_con_gemini(prompt)
-    #     if analisis:
-    #         enviar_mensaje_telegram(analisis)
+    if not partidos:
+        print("No se encontraron partidos programados para analizar.")
+        return
+
+    enviados = 0
+    for partido in partidos:
+        # Extraer datos básicos para filtrar los partidos del día en hora Colombia
+        nombre_partido = partido.get("name", "Partido Sin Nombre")
+        liga = partido.get("league", {}).get("name", "Liga Desconocida")
+        
+        # Crear el prompt para el análisis
+        prompt = (
+            f"Analiza este partido de eSports y entrega un pronóstico breve para apuestas:\n"
+            f"Evento: {nombre_partido}\n"
+            f"Torneo/Liga: {liga}\n"
+            f"Detalles completos: {partido}"
+        )
+        
+        # Analizar con Gemini
+        analisis = analizar_con_gemini(prompt)
+        
+        if analisis:
+            mensaje_final = f"🎮 *ANÁLISIS DE ESPORTS*\n🏆 *{liga}*\n⚔️ {nombre_partido}\n\n{analisis}"
+            if enviar_mensaje_telegram(mensaje_final):
+                enviados += 1
+
+    print(f"Proceso eSports completado. Enviados: {enviados}")
+
 
 if __name__ == "__main__":
     main()
