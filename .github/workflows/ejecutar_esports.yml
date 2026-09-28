@@ -2,7 +2,7 @@ name: Ejecutar Bot de eSports
 
 on:
   schedule:
-    # 13:30 UTC = 08:30 AM Hora Colombia (UTC-5)
+    # 13:30 UTC equivale a las 08:30 AM Hora Colombia (UTC-5)
     - cron: '30 13 * * *'
   workflow_dispatch:
 
