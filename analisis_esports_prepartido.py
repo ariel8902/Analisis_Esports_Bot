@@ -15,7 +15,7 @@ print("--- INICIANDO ESCANEO DE ESPORTS ---")
 print(f"Fecha local (Colombia): {fecha_hoy_colombia}")
 
 # ==========================================
-# 2. CARGA Y VALIDACIÓN DE VARIABLES DE ENTORNO
+# 2. CARGA DE VARIABLES DE ENTORNO
 # ==========================================
 PANDASCORE_TOKEN = os.getenv("PANDASCORE_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN_ESPORTS")
@@ -27,39 +27,37 @@ if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
 else:
     print("Credenciales de Telegram cargadas correctamente.")
 
-if not GEMINI_API_KEY:
-    print("Error: GEMINI_API_KEY no configurada.")
-
-if not PANDASCORE_TOKEN:
-    print("Error: PANDASCORE_TOKEN no configurada.")
-
 # Inicializar cliente Gemini
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = None
+if GEMINI_API_KEY:
+    try:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+    except Exception as e:
+        print(f"Error inicializando cliente de Gemini: {e}")
 
 
 # ==========================================
-# 3. EVALUACIÓN CON GEMINI
+# 3. EVALUACIÓN CON GEMINI (CON FALLBACK DE MODELOS)
 # ==========================================
 def analizar_con_gemini(prompt):
-    """
-    Evaluación usando el modelo recomendado por la API en tu consola.
-    """
-    max_intentos = 3
-    for intento in range(max_intentos):
+    if not client:
+        return None
+    
+    # Lista de modelos estables a probar progresivamente
+    modelos_a_probar = ["gemini-1.5-flash", "gemini-1.5-pro"]
+    
+    for mod in modelos_a_probar:
         try:
             respuesta = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=mod,
                 contents=prompt
             )
             if respuesta and respuesta.text:
                 return respuesta.text
         except Exception as e:
-            if "503" in str(e) and intento < max_intentos - 1:
-                print(f"Gemini ocupado (503). Reintentando en 5s... (Intento {intento + 1}/{max_intentos})")
-                time.sleep(5)
-            else:
-                print(f"Error evaluando partido con Gemini: {e}")
-                return None
+            print(f"Fallo con modelo {mod}: {e}")
+            continue
+
     return None
 
 
@@ -127,23 +125,28 @@ def main():
         return
 
     enviados = 0
-    for partido in partidos:
+    # Enviamos los primeros 5 partidos para validar la entrega sin saturar Telegram
+    for partido in partidos[:5]:
         nombre_partido = partido.get("name", "Partido Sin Nombre")
         liga = partido.get("league", {}).get("name", "Liga Desconocida")
         
         prompt = (
             f"Analiza este partido de eSports y entrega un pronóstico breve para apuestas:\n"
             f"Evento: {nombre_partido}\n"
-            f"Torneo/Liga: {liga}\n"
-            f"Detalles completos: {partido}"
+            f"Torneo/Liga: {liga}"
         )
         
         analisis = analizar_con_gemini(prompt)
         
+        # SI GEMINI GENERA ANÁLISIS, LO INCLUYE; SI FALLA, ENVÍA LOS DATOS BÁSICOS DEL PARTIDO
         if analisis:
             mensaje_final = f"🎮 *ANÁLISIS DE ESPORTS*\n🏆 *{liga}*\n⚔️ {nombre_partido}\n\n{analisis}"
-            if enviar_mensaje_telegram(mensaje_final):
-                enviados += 1
+        else:
+            mensaje_final = f"🎮 *PRÓXIMO PARTIDO ESPORTS*\n🏆 *{liga}*\n⚔️ {nombre_partido}\n\n_(Análisis de IA no disponible temporalmente)_"
+        
+        if enviar_mensaje_telegram(mensaje_final):
+            enviados += 1
+            time.sleep(1) # Pausa de 1 segundo entre mensajes para respetar los límites de la API de Telegram
 
     print(f"Proceso eSports completado. Enviados: {enviados}")
 
