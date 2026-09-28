@@ -1,167 +1,88 @@
 import os
-import math
 import json
 import time
-import random
 import urllib.request
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, Field
 from google import genai
-from google.genai import types
 
 # ---------------------------------------------------------
-# 1. CONFIGURACIÓN, CREDENCIALES Y ZONA HORARIA
+# 1. CREDENCIALES SEGURAS Y CONFIGURACIÓN DE ENTORNO
 # ---------------------------------------------------------
-PANDASCORE_TOKEN = os.getenv("PANDASCORE_TOKEN", "Jxk4dGBK3ZDscCP1j1I855-ClSheRATabiwM7_FBZRa3UH7RKwQ")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN_ESPORTS", "8919715865:AAEZYIYdoZVs_8zqt0M321i4OvN2RPsCy1o")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID_ESPORTS", "8707489920")
+PANDASCORE_TOKEN = os.getenv("PANDASCORE_TOKEN")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 UMBRAL_MINIMO_FILTRO = 70.0
-NUM_SIMULACIONES = 10000
 ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-MODELO_OFICIAL = 'gemini-3.8-flash'
+client_gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+MODELO_GEMINI = 'gemini-3.8-flash'
 
 LIGAS_PRIORITARIAS = [
     "WORLDS", "WORLD CHAMPIONSHIP", "MSI", "MID-SEASON INVITATIONAL",
-    "LCK", "LPL", "LEC", "LCS", "VCS", "LLA", "CBLOL", "PCS",
+    "LCK", "LPL", "LEC", "LCS", "VCS", "CBLOL", "PCS",
     "MAJOR", "IEM", "INTEL EXTREME MASTERS", "ESL PRO LEAGUE", 
     "BLAST", "BLAST PREMIER", "WORLD FINAL", "PGL"
 ]
 
-class AjusteFuerzaeSportsSchema(BaseModel):
-    prob_mapa_local: float = Field(description="Probabilidad base estimada del equipo local de ganar 1 mapa individual (0.1 a 0.9)")
-    prob_mapa_visitante: float = Field(description="Probabilidad base estimada del equipo visitante de ganar 1 mapa individual (0.1 a 0.9)")
-    novedades_roster: str = Field(description="Resumen breve de parches, sustitutos o estado de forma reciente.")
+class AnalisiseSportsSchema(BaseModel):
+    prob_pick_principal: float = Field(description="Probabilidad estimada de la opción principal (0 a 100)")
+    pick_principal: str = Field(description="Nombre exacto del mercado principal (ej. Total de Mapas > 2.5, Handicap +1.5 Local)")
+    stake_principal: str = Field(description="Stake sugerido (ej. 4/5)")
+    prob_cobertura: float = Field(description="Probabilidad estimada de la cobertura (0 a 100)")
+    pick_cobertura: str = Field(description="Nombre exacto de la cobertura (ej. Hándicap +1.5 Visitante)")
+    analisis_tactico: str = Field(description="Justificación técnica sintética del partido en máximo 2 oraciones.")
+
+def enviar_mensaje_telegram(texto):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Error: Credenciales de Telegram eSports no configuradas.")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = json.dumps({"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "HTML"}).encode('utf-8')
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=10) as res:
+            if res.status != 200:
+                print(f"Telegram eSports respondió con código HTTP {res.status}")
+    except Exception as e:
+        print("Error enviando Telegram eSports:", e)
 
 # ---------------------------------------------------------
-# 2. MOTOR CUANTITATIVO ESTOCÁSTICO (MONTE CARLO ESPORTS)
-# ---------------------------------------------------------
-def simular_serie_esports(prob_mapa_loc, prob_mapa_vis, numero_mapas=3, num_simulaciones=10000):
-    p_win_map_loc = prob_mapa_loc / (prob_mapa_loc + prob_mapa_vis)
-    mapas_para_ganar = 2 if numero_mapas == 3 else 3
-
-    victoria_local = 0
-    victoria_visitante = 0
-    over_mapas = 0
-    local_gana_al_menos_1 = 0
-    visita_gana_al_menos_1 = 0
-
-    for _ in range(num_simulaciones):
-        maps_loc = 0
-        maps_vis = 0
-        
-        while maps_loc < mapas_para_ganar and maps_vis < mapas_para_ganar:
-            if random.random() < p_win_map_loc:
-                maps_loc += 1
-            else:
-                maps_vis += 1
-
-        total_mapas_jugados = maps_loc + maps_vis
-        
-        if maps_loc > maps_vis:
-            victoria_local += 1
-        else:
-            victoria_visitante += 1
-
-        if maps_loc >= 1:
-            local_gana_al_menos_1 += 1
-        if maps_vis >= 1:
-            visita_gana_al_menos_1 += 1
-
-        if numero_mapas == 3 and total_mapas_jugados >= 3:
-            over_mapas += 1
-        elif numero_mapas == 5 and total_mapas_jugados >= 4:
-            over_mapas += 1
-
-    p_over = (over_mapas / num_simulaciones) * 100
-    p_hc_loc = (local_gana_al_menos_1 / num_simulaciones) * 100
-    p_hc_vis = (visita_gana_al_menos_1 / num_simulaciones) * 100
-
-    return {
-        "p_over": round(p_over, 1),
-        "p_hc_loc": round(p_hc_loc, 1),
-        "p_hc_vis": round(p_hc_vis, 1)
-    }
-
-# ---------------------------------------------------------
-# 3. REFINACIÓN CUALITATIVA EN VIVO CON GEMINI 3.8
-# ---------------------------------------------------------
-def analizar_partido_esports_ia(equipo_local, equipo_visitante, liga, numero_mapas):
-    prob_loc = 0.50
-    prob_vis = 0.50
-
-    if client:
-        fecha_hoy = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y-%m-%d")
-        prompt = (
-            f"Investiga en Google Search el estado de forma actual de hoy ({fecha_hoy}) para el partido de eSports: {equipo_local} vs {equipo_visitante} ({liga}).\n"
-            f"Analiza win-rate reciente, rendimiento en el parche actual, bajas de jugadores o sustitutos de última hora.\n"
-            f"Estima la probabilidad de ganar 1 mapa individual para cada equipo."
-        )
-        try:
-            time.sleep(4)
-            response = client.models.generate_content(
-                model=MODELO_OFICIAL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    tools=[types.Tool(google_search=types.GoogleSearch())],
-                    response_mime_type="application/json",
-                    response_schema=AjusteFuerzaeSportsSchema,
-                )
-            )
-            if response.text:
-                data = json.loads(response.text)
-                prob_loc = float(data.get("prob_mapa_local", 0.50))
-                prob_vis = float(data.get("prob_mapa_visitante", 0.50))
-        except Exception as e:
-            print("Aviso en llamada a Gemini eSports:", e)
-
-    stats = simular_serie_esports(prob_loc, prob_vis, numero_mapas, NUM_SIMULACIONES)
-    
-    if numero_mapas == 3:
-        nombre_over = "Total de mapas -> Más de 2.5"
-        concepto_over = "La serie se alarga a 3 mapas (Ambos ganan al menos 1 mapa)"
-    else:
-        nombre_over = "Total de mapas -> Más de 3.5"
-        concepto_over = "La serie se alarga a más de 3.5 mapas"
-
-    opciones = [
-        (concepto_over, nombre_over, stats["p_over"]),
-        (f"{equipo_local} gana al menos 1 mapa", f"Hándicap de Mapas -> {equipo_local} (+1.5)", stats["p_hc_loc"]),
-        (f"{equipo_visitante} gana al menos 1 mapa", f"Hándicap de Mapas -> {equipo_visitante} (+1.5)", stats["p_hc_vis"])
-    ]
-    
-    opciones_ordenadas = sorted(opciones, key=lambda x: x[2], reverse=True)
-    top_pick = opciones_ordenadas[0]
-    cobertura = opciones_ordenadas[1]
-
-    return {
-        "certeza": f"{top_pick[2]}%",
-        "pick_principal": top_pick[0],
-        "betplay_principal": top_pick[1],
-        "stake_principal": "5/5" if top_pick[2] >= 80 else "4/5",
-        "pick_cobertura": cobertura[0],
-        "betplay_cobertura": cobertura[1],
-        "stake_cobertura": "5/5" if cobertura[2] >= 80 else "4/5"
-    }
-
-# ---------------------------------------------------------
-# 4. CONSULTA PANDASCORE CON HORARIOS UTC-5 PRECISOS
+# 2. INGESTA PANDASCORE CON FILTRO TEMPORAL (HOY)
 # ---------------------------------------------------------
 def obtener_partidos_pandascore():
-    url = f"https://api.pandascore.co/matches/upcoming?page[size]=15&sort=scheduled_at"
+    if not PANDASCORE_TOKEN:
+        print("Error: PANDASCORE_TOKEN no está configurada en los Secrets.")
+        return []
+
+    url = "https://api.pandascore.co/matches/upcoming?page[size]=25&sort=scheduled_at"
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {PANDASCORE_TOKEN}", "Accept": "application/json"})
     
     partidos_filtrados = []
+    ahora_utc = datetime.now(timezone.utc)
+    limite_jornada = ahora_utc + timedelta(hours=20)
+
     try:
-        with urllib.request.urlopen(req) as res:
+        with urllib.request.urlopen(req, timeout=10) as res:
             if res.status == 200:
                 eventos = json.loads(res.read().decode('utf-8'))
                 for ev in eventos:
                     if ev.get("opponents") and len(ev["opponents"]) >= 2:
+                        # Filtro de tiempo: Solo partidos dentro de las próximas 20 horas
+                        hora_raw = ev.get("scheduled_at", "")
+                        if not hora_raw:
+                            continue
+                        try:
+                            dt_utc = datetime.fromisoformat(hora_raw.replace("Z", "+00:00"))
+                            if not (ahora_utc <= dt_utc <= limite_jornada):
+                                continue
+                            hora_fmt = dt_utc.astimezone(ZONA_HORARIA_COLOMBIA).strftime("%H:%M")
+                        except Exception:
+                            continue
+
                         liga_nom = ev.get("league", {}).get("name", "")
                         torneo_nom = ev.get("tournament", {}).get("name", "")
                         liga_completa = f"{liga_nom} {torneo_nom}".strip().upper()
@@ -171,20 +92,11 @@ def obtener_partidos_pandascore():
                             eq2 = ev["opponents"][1]["opponent"]["name"]
                             num_mapas = ev.get("number_of_games", 3)
                             juego_nombre = ev.get("videogame", {}).get("name", "eSports")
-                            
-                            # Conversión precisa de hora UTC a Hora Colombia (UTC-5)
-                            hora_raw = ev.get("scheduled_at", "")
-                            try:
-                                dt_utc = datetime.fromisoformat(hora_raw.replace("Z", "+00:00"))
-                                dt_col = dt_utc.astimezone(ZONA_HORARIA_COLOMBIA)
-                                hora_fmt = dt_col.strftime("%Y-%m-%d — %I:%M %p")
-                            except Exception:
-                                hora_fmt = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y-%m-%d — %I:%M %p")
 
                             if "league of legends" in juego_nombre.lower() or "lol" in juego_nombre.lower():
-                                juego_formateado = "🎮 League of Legends (LoL)"
+                                juego_formateado = "🎮 LoL"
                             elif "counter-strike" in juego_nombre.lower() or "cs" in juego_nombre.lower():
-                                juego_formateado = "🔫 Counter-Strike 2 (CS2)"
+                                juego_formateado = "🔫 CS2"
                             else:
                                 juego_formateado = f"🎮 {juego_nombre}"
 
@@ -192,7 +104,7 @@ def obtener_partidos_pandascore():
                                 "juego": juego_formateado,
                                 "local": eq1,
                                 "visitante": eq2,
-                                "liga": liga_completa,
+                                "liga": liga_nom if liga_nom else liga_completa,
                                 "num_mapas": num_mapas,
                                 "hora": hora_fmt
                             })
@@ -202,51 +114,82 @@ def obtener_partidos_pandascore():
     return partidos_filtrados
 
 # ---------------------------------------------------------
-# 5. DESPACHO A TELEGRAM
+# 3. EVALUACIÓN Y FILTRADO CON GEMINI IA
 # ---------------------------------------------------------
-def enviar_mensaje_telegram(texto):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = urllib.parse.urlencode({"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "Markdown"}).encode('utf-8')
-    req = urllib.request.Request(url, data=payload, method='POST')
-    try:
-        with urllib.request.urlopen(req, timeout=10) as res:
-            print("Mensaje eSports despachado a Telegram. HTTP:", res.status)
-    except Exception as e:
-        print("Error enviando Telegram eSports:", e)
+def analizar_partido_esports_ia(partido):
+    if not client_gemini:
+        return None
 
+    prompt = (
+        f"Evalúa objetivamente el partido de eSports: {partido['local']} vs {partido['visitante']} ({partido['liga']}). "
+        f"Formato del partido: Al mejor de {partido['num_mapas']} mapas (BO{partido['num_mapas']}).\n"
+        f"Analiza la probabilidad real de los mercados: Total de Mapas (Over) y Hándicaps (+1.5 mapas).\n"
+        f"Proporciona la probabilidad estimada (0-100) para la mejor opción y la opción de cobertura."
+    )
+
+    try:
+        res = client_gemini.models.generate_content(
+            model=MODELO_GEMINI,
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_schema": AnalisiseSportsSchema,
+            }
+        )
+        if res and res.text:
+            return json.loads(res.text)
+    except Exception as e:
+        print("Error evaluando partido con Gemini:", e)
+
+    return None
+
+# ---------------------------------------------------------
+# 4. ORQUESTADOR Y DESPACHO
+# ---------------------------------------------------------
 def ejecutar_escaneo():
+    fecha_colombia = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y-%m-%d")
+    print(f"Iniciando escaneo de eSports: {fecha_colombia}")
+    
     partidos = obtener_partidos_pandascore()
     
     if not partidos:
-        fecha_colombia = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y-%m-%d")
         mensaje = (
-            f"🛡️ **REPORTE ESPORTS JORNADA - {fecha_colombia}**\n\n"
-            f"📊 *No se registran partidos programados de torneos Tier-1 / Ligas Prioritarias en este momento.*\n\n"
-            f"💡 *El sistema reanudará el escaneo en el siguiente ciclo automático.*"
+            f"🏆 <b>REPORTE ESPORTS - {fecha_colombia}</b>\n\n"
+            f"<i>Sin partidos programados de ligas Tier-1 en las próximas 20 horas.</i>"
         )
         enviar_mensaje_telegram(mensaje)
+        print("Finalizado: Sin partidos hoy.")
         return
 
+    enviar_mensaje_telegram(f"🏆 <b>PRONÓSTICOS ESPORTS VIP</b> | Fecha: <b>{fecha_colombia}</b>")
+    partidos_enviados = 0
+
     for p in partidos:
-        res = analizar_partido_esports_ia(p["local"], p["visitante"], p["liga"], p["num_mapas"])
-        
+        analisis = analizar_partido_esports_ia(p)
+        if not analisis:
+            continue
+
+        prob_max = max(analisis.get("prob_pick_principal", 0), analisis.get("prob_cobertura", 0))
+
+        # FILTRO ESTRICTO DE CERTEZA (MÍNIMO 70%)
+        if prob_max < UMBRAL_MINIMO_FILTRO:
+            continue
+
         mensaje = (
-            f"🏆 **{p['juego']}**\n"
-            f"⚔️ **{p['local']} vs {p['visitante']}**\n"
-            f"🏟️ **Liga:** `{p['liga']}`\n"
-            f"🕓 `{p['hora']}` **(BO{p['num_mapas']})**\n\n"
-            f"🎯 **Certeza Estimada de la Dinámica:** **`{res['certeza']}`**\n\n"
-            f"🔥 **PRONÓSTICO PRINCIPAL (MÁXIMA CERTEZA):**\n"
-            f"🎯 **Concepto:** {res['pick_principal']}\n"
-            f"📌 **En Betplay/Rushbet buscar:** `{res['betplay_principal']}`\n"
-            f"📈 **Confianza / Stake:** `{res['stake_principal']}`\n\n"
-            f"🛡️ **OPCIÓN COBERTURA (BLINDADA):**\n"
-            f"🎯 **Concepto:** {res['pick_cobertura']}\n"
-            f"📌 **En Betplay/Rushbet buscar:** `{res['betplay_cobertura']}`\n"
-            f"📈 **Confianza / Stake:** `{res['stake_cobertura']}`"
+            f"🏆 <b>{p['juego']} - {p['liga']}</b> | {p['local']} vs {p['visitante']}\n"
+            f"⏰ <b>Hora:</b> <code>{p['hora']}</code> <b>(BO{p['num_mapas']})</b>\n\n"
+            f"🎯 <b>APUESTA PRINCIPAL: {analisis['pick_principal']}</b>\n"
+            f"📊 <b>Probabilidad:</b> <code>{analisis['prob_pick_principal']}%</code> | <b>Stake:</b> <code>{analisis['stake_principal']}</code>\n"
+            f"💡 <i>[Gemini] {analisis['analisis_tactico']}</i>\n\n"
+            f"🛡️ <b>COBERTURA ALTERNATIVA:</b> {analisis['pick_cobertura']} (<code>{analisis['prob_cobertura']}%</code>)"
         )
+        
         enviar_mensaje_telegram(mensaje)
-        time.sleep(3)
+        partidos_enviados += 1
+        time.sleep(2)
+
+    enviar_mensaje_telegram(f"<b>Escaneo eSports completado.</b> Pronósticos enviados: {partidos_enviados}")
+    print(f"Proceso eSports completado. Enviados: {partidos_enviados}")
 
 if __name__ == "__main__":
     ejecutar_escaneo()
