@@ -27,35 +27,37 @@ if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
 else:
     print("Credenciales de Telegram cargadas correctamente.")
 
-# Inicializar cliente Gemini
+# Inicializar cliente de Gemini con la SDK google-genai
 client = None
 if GEMINI_API_KEY:
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
     except Exception as e:
-        print(f"Error inicializando cliente de Gemini: {e}")
+        print(f"Error inicializando cliente Gemini: {e}")
 
 
 # ==========================================
-# 3. EVALUACIÓN CON GEMINI (CON FALLBACK DE MODELOS)
+# 3. EVALUACIÓN CON GEMINI
 # ==========================================
 def analizar_con_gemini(prompt):
     if not client:
+        print("Cliente de Gemini no configurado.")
         return None
     
-    # Lista de modelos estables a probar progresivamente
-    modelos_a_probar = ["gemini-1.5-flash", "gemini-1.5-pro"]
+    # Modelos compatibles a probar
+    modelos = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
     
-    for mod in modelos_a_probar:
+    for mod in modelos:
         try:
             respuesta = client.models.generate_content(
                 model=mod,
                 contents=prompt
             )
-            if respuesta and respuesta.text:
+            if respuesta and hasattr(respuesta, 'text') and respuesta.text:
+                print(f"Análisis generado con éxito usando el modelo: {mod}")
                 return respuesta.text
         except Exception as e:
-            print(f"Fallo con modelo {mod}: {e}")
+            print(f"Error con el modelo {mod}: {e}")
             continue
 
     return None
@@ -125,20 +127,20 @@ def main():
         return
 
     enviados = 0
-    # Enviamos los primeros 5 partidos para validar la entrega sin saturar Telegram
+    # Procesamos los primeros 5 partidos para la prueba
     for partido in partidos[:5]:
         nombre_partido = partido.get("name", "Partido Sin Nombre")
         liga = partido.get("league", {}).get("name", "Liga Desconocida")
         
         prompt = (
-            f"Analiza este partido de eSports y entrega un pronóstico breve para apuestas:\n"
-            f"Evento: {nombre_partido}\n"
-            f"Torneo/Liga: {liga}"
+            f"Analiza brevemente este partido de eSports para apuestas de forma concisa:\n"
+            f"Partido: {nombre_partido}\n"
+            f"Torneo/Liga: {liga}\n"
+            f"Por favor indica favorito y recomendación breve."
         )
         
         analisis = analizar_con_gemini(prompt)
         
-        # SI GEMINI GENERA ANÁLISIS, LO INCLUYE; SI FALLA, ENVÍA LOS DATOS BÁSICOS DEL PARTIDO
         if analisis:
             mensaje_final = f"🎮 *ANÁLISIS DE ESPORTS*\n🏆 *{liga}*\n⚔️ {nombre_partido}\n\n{analisis}"
         else:
@@ -146,7 +148,7 @@ def main():
         
         if enviar_mensaje_telegram(mensaje_final):
             enviados += 1
-            time.sleep(1) # Pausa de 1 segundo entre mensajes para respetar los límites de la API de Telegram
+            time.sleep(1)
 
     print(f"Proceso eSports completado. Enviados: {enviados}")
 
