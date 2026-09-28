@@ -27,7 +27,7 @@ if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
 else:
     print("Credenciales de Telegram cargadas correctamente.")
 
-# Inicializar cliente de Gemini con la SDK google-genai
+# Inicializar cliente Gemini
 client = None
 if GEMINI_API_KEY:
     try:
@@ -44,8 +44,8 @@ def analizar_con_gemini(prompt):
         print("Cliente de Gemini no configurado.")
         return None
     
-    # Modelos compatibles a probar
-    modelos = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+    # Modelos requeridos por la versión actual del entorno
+    modelos = ["gemini-3.8-flash", "gemini-2.5-flash"]
     
     for mod in modelos:
         try:
@@ -127,7 +127,6 @@ def main():
         return
 
     enviados = 0
-    # Procesamos los primeros 5 partidos para la prueba
     for partido in partidos[:5]:
         nombre_partido = partido.get("name", "Partido Sin Nombre")
         liga = partido.get("league", {}).get("name", "Liga Desconocida")
@@ -136,7 +135,7 @@ def main():
             f"Analiza brevemente este partido de eSports para apuestas de forma concisa:\n"
             f"Partido: {nombre_partido}\n"
             f"Torneo/Liga: {liga}\n"
-            f"Por favor indica favorito y recomendación breve."
+            f"Indica un favorito probable y un consejo corto."
         )
         
         analisis = analizar_con_gemini(prompt)
