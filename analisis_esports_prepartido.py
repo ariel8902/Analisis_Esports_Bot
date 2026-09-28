@@ -2,17 +2,17 @@ import os
 import time
 import requests
 from datetime import datetime
-import pytz
+from zoneinfo import ZoneInfo
 from google import genai
 
 # ==========================================
-# 1. MANEJO DE FECHA EN ZONA HORARIA COLOMBIA
+# 1. FECHA Y ZONA HORARIA (COLOMBIA)
 # ==========================================
-# Evita desfases al ejecutarse en GitHub Actions (que corre en UTC)
-tz_colombia = pytz.timezone('America/Bogota')
+# Uso de zoneinfo nativo (Python 3.9+) para evitar errores de librerías faltantes
+tz_colombia = ZoneInfo("America/Bogota")
 fecha_hoy_colombia = datetime.now(tz_colombia).strftime('%Y-%m-%d')
 
-print(f"--- INICIANDO ESCANEO DE ESPORTS ---")
+print("--- INICIANDO ESCANEO DE ESPORTS ---")
 print(f"Fecha local (Colombia): {fecha_hoy_colombia}")
 
 # ==========================================
@@ -39,11 +39,11 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 # ==========================================
-# 3. EVALUACIÓN CON GEMINI (REINTENTOS CONTRA ERROR 503)
+# 3. EVALUACIÓN CON GEMINI (MANEJO DE ERROR 503)
 # ==========================================
 def analizar_con_gemini(prompt):
     """
-    Soporta reintentos automáticos ante errores de saturación (503 UNAVAILABLE).
+    Soporta reintentos automáticos ante errores de alta demanda (503 UNAVAILABLE).
     """
     max_intentos = 3
     for intento in range(max_intentos):
@@ -67,7 +67,7 @@ def analizar_con_gemini(prompt):
 # ==========================================
 def enviar_mensaje_telegram(mensaje):
     """
-    Envía la respuesta analizada al canal/chat de Telegram.
+    Envía el análisis generado al chat/canal de Telegram.
     """
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("Error: Credenciales de Telegram eSports no configuradas.")
@@ -83,7 +83,7 @@ def enviar_mensaje_telegram(mensaje):
     try:
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
-            print(f"Mensaje eSports despachado a Telegram. HTTP: 200")
+            print("Mensaje eSports despachado a Telegram. HTTP: 200")
             return True
         else:
             print(f"Error Telegram HTTP {response.status_code}: {response.text}")
@@ -105,8 +105,7 @@ def obtener_partidos_pandascore():
         "Authorization": f"Bearer {PANDASCORE_TOKEN}"
     }
     
-    # Consultar partidos en estado 'upcoming' o de la fecha
-    url = f"https://api.pandascore.co/matches/upcoming?page[size]=50"
+    url = "https://api.pandascore.co/matches/upcoming?page[size]=50"
     
     try:
         res = requests.get(url, headers=headers, timeout=10)
@@ -134,11 +133,9 @@ def main():
 
     enviados = 0
     for partido in partidos:
-        # Extraer datos básicos para filtrar los partidos del día en hora Colombia
         nombre_partido = partido.get("name", "Partido Sin Nombre")
         liga = partido.get("league", {}).get("name", "Liga Desconocida")
         
-        # Crear el prompt para el análisis
         prompt = (
             f"Analiza este partido de eSports y entrega un pronóstico breve para apuestas:\n"
             f"Evento: {nombre_partido}\n"
@@ -146,7 +143,6 @@ def main():
             f"Detalles completos: {partido}"
         )
         
-        # Analizar con Gemini
         analisis = analizar_con_gemini(prompt)
         
         if analisis:
