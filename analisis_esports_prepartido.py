@@ -38,37 +38,46 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 # ==========================================
-# 3. EVALUACIÓN CON GEMINI (MODELO CORREGIDO)
+# 3. EVALUACIÓN CON GEMINI (CON FALLBACK DE MODELOS)
 # ==========================================
 def analizar_con_gemini(prompt):
     """
-    Soporta reintentos automáticos ante errores de alta demanda (503 UNAVAILABLE).
+    Intenta evaluar el prompt probando modelos compatibles.
+    Maneja también el error 503 por saturación.
     """
-    max_intentos = 3
-    for intento in range(max_intentos):
-        try:
-            # CORREGIDO: Se usa el modelo estándar 'gemini-1.5-flash' o 'gemini-2.0-flash'
-            respuesta = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=prompt
-            )
-            return respuesta.text
-        except Exception as e:
-            if "503" in str(e) and intento < max_intentos - 1:
-                print(f"Gemini ocupado (503). Reintentando en 5s... (Intento {intento + 1}/{max_intentos})")
-                time.sleep(5)
-            else:
-                print(f"Error evaluando partido con Gemini: {e}")
-                return None
+    modelos_a_probar = ["gemini-2.0-flash", "gemini-1.5-flash"]
+    
+    for modelo in modelos_a_probar:
+        max_intentos = 2
+        for intento in range(max_intentos):
+            try:
+                respuesta = client.models.generate_content(
+                    model=modelo,
+                    contents=prompt
+                )
+                if respuesta and respuesta.text:
+                    return respuesta.text
+            except Exception as e:
+                error_str = str(e)
+                # Si el modelo no existe (404), rompemos el bucle interno e intentamos con el siguiente modelo
+                if "404" in error_str or "NOT_FOUND" in error_str:
+                    print(f"Modelo {modelo} no disponible. Probando siguiente...")
+                    break
+                # Si hay sobrecarga (503), esperamos y reintentamos
+                elif "503" in error_str and intento < max_intentos - 1:
+                    print(f"Gemini ocupado (503) en {modelo}. Reintentando en 5s...")
+                    time.sleep(5)
+                else:
+                    print(f"Error en {modelo}: {e}")
+                    break
+
+    return None
 
 
 # ==========================================
 # 4. ENVÍO DE NOTIFICACIONES A TELEGRAM
 # ==========================================
 def enviar_mensaje_telegram(mensaje):
-    """
-    Envía el análisis generado al chat/canal de Telegram.
-    """
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         print("Error: Credenciales de Telegram eSports no configuradas.")
         return False
@@ -97,9 +106,6 @@ def enviar_mensaje_telegram(mensaje):
 # 5. CONSULTA DE PARTIDOS EN PANDASCORE
 # ==========================================
 def obtener_partidos_pandascore():
-    """
-    Consulta los partidos programados utilizando la API de PandaScore.
-    """
     headers = {
         "Accept": "application/json",
         "Authorization": f"Bearer {PANDASCORE_TOKEN}"
