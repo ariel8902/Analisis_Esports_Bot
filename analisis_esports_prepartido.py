@@ -37,28 +37,33 @@ if GEMINI_API_KEY:
 
 
 # ==========================================
-# 3. EVALUACIÓN CON GEMINI
+# 3. EVALUACIÓN CON GEMINI (CON REINTENTOS PARA 503)
 # ==========================================
 def analizar_con_gemini(prompt):
     if not client:
         print("Cliente de Gemini no configurado.")
         return None
     
-    # Modelos requeridos por la versión actual del entorno
-    modelos = ["gemini-3.8-flash", "gemini-2.5-flash"]
+    modelo_correcto = "gemini-3.8-flash"
+    max_intentos = 3
     
-    for mod in modelos:
+    for intento in range(max_intentos):
         try:
             respuesta = client.models.generate_content(
-                model=mod,
+                model=modelo_correcto,
                 contents=prompt
             )
             if respuesta and hasattr(respuesta, 'text') and respuesta.text:
-                print(f"Análisis generado con éxito usando el modelo: {mod}")
+                print(f"Análisis generado con éxito usando {modelo_correcto}")
                 return respuesta.text
         except Exception as e:
-            print(f"Error con el modelo {mod}: {e}")
-            continue
+            error_str = str(e)
+            if "503" in error_str and intento < max_intentos - 1:
+                print(f"Gemini saturado (503). Reintentando en 4 segundos... (Intento {intento + 1}/{max_intentos})")
+                time.sleep(4)
+            else:
+                print(f"Error con el modelo {modelo_correcto}: {e}")
+                break
 
     return None
 
