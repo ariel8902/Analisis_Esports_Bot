@@ -27,7 +27,7 @@ jobs:
       - name: Ejecutar motor eSports
         env:
           PANDASCORE_TOKEN: ${{ secrets.PANDASCORE_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN_ESPORTS }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_ESPORTS }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python analisis_esports_prepartido.py
