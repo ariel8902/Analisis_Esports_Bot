@@ -37,26 +37,29 @@ if GEMINI_API_KEY:
 
 
 # ==========================================
-# 3. EVALUACIÓN CON GEMINI (CONTROL DE RITMO GRATUITO)
+# 3. EVALUACIÓN CON GEMINI (MODELO CORRECTO Y REINTENTOS)
 # ==========================================
 def analizar_con_gemini(prompt):
     if not client:
         print("Cliente de Gemini no configurado.")
         return None
     
-    # Modelo actual recomendado para respuestas veloces
-    modelo = "gemini-2.5-flash"
+    # Nombre del modelo EXIGIDO por el entorno según la consola
+    modelo = "gemini-3.8-flash"
+    max_intentos = 3
     
-    try:
-        respuesta = client.models.generate_content(
-            model=modelo,
-            contents=prompt
-        )
-        if respuesta and hasattr(respuesta, 'text') and respuesta.text:
-            return respuesta.text
-    except Exception as e:
-        print(f"Error evaluando con Gemini: {e}")
-        return None
+    for intento in range(max_intentos):
+        try:
+            respuesta = client.models.generate_content(
+                model=modelo,
+                contents=prompt
+            )
+            if respuesta and hasattr(respuesta, 'text') and respuesta.text:
+                return respuesta.text
+        except Exception as e:
+            print(f"Intento {intento + 1}/{max_intentos} falló con {modelo}: {e}")
+            if intento < max_intentos - 1:
+                time.sleep(6)  # Espera para evitar saturación o límites de cuota
 
     return None
 
@@ -125,7 +128,7 @@ def main():
         return
 
     enviados = 0
-    # Procesamos los primeros 5 partidos para no agotar la cuota gratuita
+    # Procesamos los primeros 5 partidos
     for partido in partidos[:5]:
         nombre_partido = partido.get("name", "Partido Sin Nombre")
         liga = partido.get("league", {}).get("name", "Liga Desconocida")
@@ -146,8 +149,7 @@ def main():
         
         if enviar_mensaje_telegram(mensaje_final):
             enviados += 1
-            # Pausa estricta de 5 segundos entre partidos para garantizar respeto a la cuota gratuita
-            time.sleep(5)
+            time.sleep(3)
 
     print(f"Proceso eSports completado. Enviados: {enviados}")
 
