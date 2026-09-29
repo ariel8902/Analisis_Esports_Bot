@@ -37,37 +37,28 @@ if GEMINI_API_KEY:
 
 
 # ==========================================
-# 3. EVALUACIÓN CON GEMINI (CON ROTACIÓN DE MODELOS)
+# 3. EVALUACIÓN CON GEMINI
 # ==========================================
 def analizar_con_gemini(prompt):
     if not client:
         print("Cliente de Gemini no configurado.")
         return None
     
-    # Modelos a probar en caso de agotar la cuota de uno de ellos
-    modelos_a_probar = ["gemini-3.8-flash", "gemini-1.5-flash"]
+    modelo = "gemini-3.8-flash"
+    max_intentos = 3
     
-    for modelo in modelos_a_probar:
-        max_intentos = 2
-        for intento in range(max_intentos):
-            try:
-                respuesta = client.models.generate_content(
-                    model=modelo,
-                    contents=prompt
-                )
-                if respuesta and hasattr(respuesta, 'text') and respuesta.text:
-                    print(f"Análisis generado exitosamente con el modelo {modelo}")
-                    return respuesta.text
-            except Exception as e:
-                error_str = str(e)
-                print(f"Intento {intento + 1} con {modelo} falló: {e}")
-                
-                # Si el modelo agotó la cuota diaria (429), se salta de inmediato al siguiente modelo
-                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                    print(f"Cuota agotada en {modelo}. Probando siguiente modelo...")
-                    break
-                elif intento < max_intentos - 1:
-                    time.sleep(5)
+    for intento in range(max_intentos):
+        try:
+            respuesta = client.models.generate_content(
+                model=modelo,
+                contents=prompt
+            )
+            if respuesta and hasattr(respuesta, 'text') and respuesta.text:
+                return respuesta.text
+        except Exception as e:
+            print(f"Intento {intento + 1}/{max_intentos} falló con {modelo}: {e}")
+            if intento < max_intentos - 1:
+                time.sleep(6)
 
     return None
 
@@ -143,7 +134,7 @@ def main():
         
         prompt = (
             f"Analiza este partido de eSports: {nombre_partido} de la liga {liga}.\n"
-            f"Responde ESTRICTAMENTE con esta plantilla exacta, sin introducciones, sin guiones bajos, ni explicaciones adicionales:\n\n"
+            f"Responde ESTRICTAMENTE con esta plantilla exacta, sin introducciones, saludos ni explicaciones adicionales, y sin usar guiones bajos:\n\n"
             f"📊 **Probabilidades:**\n"
             f"• [Equipo 1]: [X]% | [Equipo 2]: [X]%\n"
             f"🎯 **Pronóstico Principal:** [Selección de apuesta] ([X]% probabilidad de acierto)\n"
