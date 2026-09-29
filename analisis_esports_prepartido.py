@@ -37,14 +37,13 @@ if GEMINI_API_KEY:
 
 
 # ==========================================
-# 3. EVALUACIÓN CON GEMINI (MODELO CORRECTO Y REINTENTOS)
+# 3. EVALUACIÓN CON GEMINI
 # ==========================================
 def analizar_con_gemini(prompt):
     if not client:
         print("Cliente de Gemini no configurado.")
         return None
     
-    # Nombre del modelo EXIGIDO por el entorno según la consola
     modelo = "gemini-3.8-flash"
     max_intentos = 3
     
@@ -59,7 +58,7 @@ def analizar_con_gemini(prompt):
         except Exception as e:
             print(f"Intento {intento + 1}/{max_intentos} falló con {modelo}: {e}")
             if intento < max_intentos - 1:
-                time.sleep(6)  # Espera para evitar saturación o límites de cuota
+                time.sleep(6)
 
     return None
 
@@ -134,18 +133,21 @@ def main():
         liga = partido.get("league", {}).get("name", "Liga Desconocida")
         
         prompt = (
-            f"Analiza este partido de eSports y dame un pronóstico muy corto y directo para apuestas:\n"
-            f"Evento: {nombre_partido}\n"
-            f"Liga: {liga}\n"
-            f"Dame favorito y consejo breve en 3 líneas."
+            f"Analiza este partido de eSports: {nombre_partido} de la liga {liga}.\n"
+            f"Responde ESTRICTAMENTE con esta plantilla exacta, sin introducciones, saludos ni explicaciones adicionales:\n\n"
+            f"📊 **Probabilidades:**\n"
+            f"• [Equipo 1]: [X]% | [Equipo 2]: [X]%\n"
+            f"🎯 **Pronóstico Principal:** [Selección de apuesta] _ ([X]% probabilidad de acierto)\n"
+            f"💡 **Mercado Alternativo:** [Selección de mercado alternativo u over/under]\n"
+            f"📈 **Confianza:** [Alta/Media/Baja] ([X]/5)"
         )
         
         analisis = analizar_con_gemini(prompt)
         
         if analisis:
-            mensaje_final = f"🎮 *ANÁLISIS DE ESPORTS*\n🏆 *{liga}*\n⚔️ {nombre_partido}\n\n{analisis}"
+            mensaje_final = f"🎮 **ESPORTS** | {liga}\n⚔️ **{nombre_partido}**\n\n{analisis}"
         else:
-            mensaje_final = f"🎮 *PRÓXIMO PARTIDO ESPORTS*\n🏆 *{liga}*\n⚔️ {nombre_partido}\n\n_(Análisis de IA no disponible temporalmente)_"
+            mensaje_final = f"🎮 **PRÓXIMO PARTIDO ESPORTS**\n🏆 *{liga}*\n⚔️ {nombre_partido}\n\n_(Análisis de IA no disponible temporalmente)_"
         
         if enviar_mensaje_telegram(mensaje_final):
             enviados += 1
