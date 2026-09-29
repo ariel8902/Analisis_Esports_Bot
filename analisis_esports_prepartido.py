@@ -113,7 +113,7 @@ def obtener_partidos_pandascore():
     return partidos_filtrados
 
 # ---------------------------------------------------------
-# 3. EVALUACIÓN CON GEMINI IA (ROBUSTA Y CON REINTENTOS)
+# 3. EVALUACIÓN CON GEMINI IA (CON RETRY ROBUSTO)
 # ---------------------------------------------------------
 def analizar_partido_esports_ia(partido):
     if not client_gemini:
@@ -164,19 +164,19 @@ def ejecutar_escaneo():
     partidos_enviados = 0
 
     for p in partidos:
-        # Pausa de seguridad para liberar la cuota de la API
         time.sleep(4)
 
         analisis = None
         reintentos = 0
+        tiempos_espera = [5, 10, 15]  # Tiempos de espera incrementales para superar errores 503
 
-        # Lógica de reintento: Hasta 3 intentos si la IA no responde a la primera
         while reintentos < 3 and not analisis:
             analisis = analizar_partido_esports_ia(p)
             if not analisis:
+                espera = tiempos_espera[reintentos]
                 reintentos += 1
-                print(f"Reintentando análisis IA para {p['local']} vs {p['visitante']} (Intento {reintentos})...")
-                time.sleep(3)
+                print(f"Reintentando análisis IA para {p['local']} vs {p['visitante']} (Intento {reintentos} tras {espera}s)...")
+                time.sleep(espera)
 
         if not analisis:
             print(f"No se pudo obtener análisis de IA para {p['local']} vs {p['visitante']} tras 3 intentos.")
