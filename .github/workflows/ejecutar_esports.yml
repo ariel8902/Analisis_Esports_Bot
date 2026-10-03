@@ -2,8 +2,8 @@ name: Bot de Analisis eSports Prepartido
 
 on:
   schedule:
-    # 13:00 UTC equivale a las 08:00 AM Hora Colombia (UTC-5)
-    - cron: '0 13 * * *'
+    # 14:00 UTC equivale a las 09:00 AM Hora Colombia (UTC-5)
+    - cron: '0 14 * * *'
   workflow_dispatch:
 
 jobs:
