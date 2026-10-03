@@ -14,8 +14,9 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PANDASCORE_API_KEY = os.getenv("PANDASCORE_TOKEN")
 
-UMBRAL_MINIMO_FILTRO = 75.0  # Elevado al 75% para mayor rentabilidad y precisión
-MAX_PARTIDOS_ENVIAR = 10     # Máximo de pronósticos por ejecución
+UMBRAL_MINIMO_FILTRO = 75.0  # Alta certeza para máxima rentabilidad
+MAX_PARTIDOS_ENVIAR = 10     # Límite máximo de envíos diarios
+VENTANA_HORAS_JORNADA = 20   # Ventana enfocada en la jornada del mismo día (20 horas)
 ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 
 client_gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -59,7 +60,8 @@ def obtener_partidos_esports():
 
     lista_partidos = []
     ahora_utc = datetime.now(timezone.utc)
-    limite_jornada = ahora_utc + timedelta(hours=36)
+    # Límite ajustado a 20 horas para analizar la jornada del mismo día
+    limite_jornada = ahora_utc + timedelta(hours=VENTANA_HORAS_JORNADA)
 
     headers = {"Authorization": f"Bearer {PANDASCORE_API_KEY}"}
 
@@ -138,16 +140,16 @@ def analizar_partido_esports_ia(partido):
 # ---------------------------------------------------------
 def ejecutar_escaneo():
     fecha_colombia = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y-%m-%d")
-    print(f"Iniciando escaneo de eSports Prepartido: {fecha_colombia}")
+    print(f"Iniciando escaneo de eSports Prepartido (Jornada Hoy - 20h): {fecha_colombia}")
     partidos = obtener_partidos_esports()
 
     if not partidos:
-        msg = f"🎮 <b>REPORTE ESPORTS - {fecha_colombia}</b>\n\n<i>Sin partidas programadas en la ventana de las próximas 36 horas.</i>"
+        msg = f"🎮 <b>REPORTE ESPORTS - {fecha_colombia}</b>\n\n<i>Sin partidas programadas para las próximas 20 horas.</i>"
         enviar_mensaje_telegram(msg)
-        print("Finalizado: Sin partidas eSports en la ventana actual.")
+        print("Finalizado: Sin partidas eSports en la ventana de 20 horas.")
         return
 
-    enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP</b> | Escaneo: <b>{fecha_colombia}</b>")
+    enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP (HOY)</b> | Escaneo: <b>{fecha_colombia}</b>")
     
     partidos_enviados = 0
     descartados_certeza = 0
@@ -157,7 +159,7 @@ def ejecutar_escaneo():
             print(f"Límite alcanzado ({MAX_PARTIDOS_ENVIAR} partidas). Deteniendo envíos.")
             break
 
-        time.sleep(3)  # Pausa de 3 segundos para evitar error 503 por tasa de solicitudes
+        time.sleep(3)  # Pausa para prevenir error 503
         analisis, estado = analizar_partido_esports_ia(p)
 
         if not analisis:
@@ -183,9 +185,9 @@ def ejecutar_escaneo():
             partidos_enviados += 1
             print(f"✅ Enviado a Telegram ({partidos_enviados}/{MAX_PARTIDOS_ENVIAR}): {p['equipo_a']} vs {p['equipo_b']}")
 
-    msg_resumen = f"<b>Escaneo eSports completado.</b> Pronósticos enviados: {partidos_enviados}"
+    msg_resumen = f"<b>Escaneo eSports completado.</b> Pronósticos enviados para hoy: {partidos_enviados}"
     if partidos_enviados == 0 and descartados_certeza > 0:
-        msg_resumen += f"\n\n<b>Detalle:</b> {descartados_certeza} partida(s) analizadas no alcanzaron el {UMBRAL_MINIMO_FILTRO}% de certeza."
+        msg_resumen += f"\n\n<b>Detalle:</b> {descartados_certeza} partida(s) de hoy no alcanzaron el {UMBRAL_MINIMO_FILTRO}% de certeza."
 
     enviar_mensaje_telegram(msg_resumen)
     print(f"Proceso eSports completado. Enviados: {partidos_enviados}")
