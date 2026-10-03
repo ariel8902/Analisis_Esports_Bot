@@ -20,10 +20,11 @@ ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 client_gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 MODELO_GEMINI = 'gemini-3.8-flash'
 
+# Slugs de PandaScore corregidos para evitar errores 404
 JUEGOS_ESPORTS = [
     {"nombre": "🎮 Counter-Strike 2", "slug": "csgo"},
-    {"nombre": "⚔️ League of Legends", "slug": "league-of-legends"},
-    {"nombre": "🛡️ Dota 2", "slug": "dota-2"}
+    {"nombre": "⚔️ League of Legends", "slug": "lol"},
+    {"nombre": "🛡️️ Dota 2", "slug": "dota2"}
 ]
 
 class AnalisisEsportsSchema(BaseModel):
