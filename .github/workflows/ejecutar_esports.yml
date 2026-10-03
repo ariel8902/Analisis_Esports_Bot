@@ -2,7 +2,7 @@ name: Bot de Analisis eSports Prepartido
 
 on:
   schedule:
-    # 13:00 UTC equivale exactamente a las 08:00 AM Hora Colombia (UTC-5)
+    # 13:00 UTC equivale a las 08:00 AM Hora Colombia (UTC-5)
     - cron: '0 13 * * *'
   workflow_dispatch:
 
@@ -22,13 +22,13 @@ jobs:
       - name: Instalar Dependencias
         run: |
           python -m pip install --upgrade pip
-          pip install google-genai pydantic
+          pip install google-genai pydantic requests
 
-- name: Ejecutar motor eSports
-      env:
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN_ESPORTS }}
-        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_ESPORTS }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        PANDASCORE_TOKEN: ${{ secrets.PANDASCORE_TOKEN }}
-        PANDASCORE_API_KEY: ${{ secrets.PANDASCORE_TOKEN }}
-      run: python analisis_esports_prepartido.py
+      - name: Ejecutar motor eSports
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN_ESPORTS }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_ESPORTS }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PANDASCORE_TOKEN: ${{ secrets.PANDASCORE_TOKEN }}
+          PANDASCORE_API_KEY: ${{ secrets.PANDASCORE_TOKEN }}
+        run: python analisis_esports_prepartido.py
