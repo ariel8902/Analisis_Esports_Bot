@@ -14,17 +14,18 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PANDASCORE_API_KEY = os.getenv("PANDASCORE_TOKEN")
 
-UMBRAL_MINIMO_FILTRO = 70.0
+UMBRAL_MINIMO_FILTRO = 75.0  # Elevado al 75% para mayor rentabilidad y precisión
+MAX_PARTIDOS_ENVIAR = 10     # Máximo de pronósticos por ejecución
 ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 
 client_gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 MODELO_GEMINI = 'gemini-3.8-flash'
 
-# Slugs de PandaScore corregidos para evitar errores 404
+# Slugs de PandaScore corregidos
 JUEGOS_ESPORTS = [
     {"nombre": "🎮 Counter-Strike 2", "slug": "csgo"},
     {"nombre": "⚔️ League of Legends", "slug": "lol"},
-    {"nombre": "🛡️️ Dota 2", "slug": "dota2"}
+    {"nombre": "🛡️ Dota 2", "slug": "dota2"}
 ]
 
 class AnalisisEsportsSchema(BaseModel):
@@ -33,7 +34,7 @@ class AnalisisEsportsSchema(BaseModel):
     stake_principal: str = Field(description="Stake sugerido (ej. 3/5 o 4/5)")
     prob_cobertura: float = Field(description="Probabilidad estimada cobertura (0 a 100)")
     pick_cobertura: str = Field(description="Opción de cobertura (ej. Hándicap Mapas +1.5)")
-    analisis_tactico: str = Field(description="Justificación táctica en máx 2 oraciones basada en estado de forma y map pool.")
+    analisis_tactico: str = Field(description="Justificación táctica en máx 2 oraciones basada en rendimiento de los últimos 10 días y map pool.")
 
 def enviar_mensaje_telegram(texto):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -87,7 +88,7 @@ def obtener_partidos_esports():
                 team_a = opponents[0].get("opponent", {}).get("name", "Equipo A")
                 team_b = opponents[1].get("opponent", {}).get("name", "Equipo B")
                 league_name = match.get("league", {}).get("name", "Torneo eSports")
-                match_type = match.get("number_of_games", 3)  # Ej. Best of 3 (Bo3)
+                match_type = match.get("number_of_games", 3)
 
                 lista_partidos.append({
                     "juego": juego["nombre"],
@@ -114,8 +115,8 @@ def analizar_partido_esports_ia(partido):
     prompt = (
         f"Analiza el partido de eSports: {partido['equipo_a']} vs {partido['equipo_b']} ({partido['juego']} - {partido['torneo']}).\n"
         f"Formato de serie: {partido['formato']}.\n"
-        f"Considera factores competitivos de eSports (estado de forma reciente, sinergia del roster, map pool habitual y jerarquía en el torneo).\n"
-        f"Establece en 'pick_principal' la mejor alternativa de valor (Ganador de Serie, Hándicap de Mapas o Total Mapas) con certeza >= 70%."
+        f"IMPORTANTE: Restringe tu evaluación táctica al rendimiento, racha y estado de forma de los equipos/jugadores durante los ÚLTIMOS 10 DÍAS, adaptación al parche actual y map pool reciente.\n"
+        f"Establece en 'pick_principal' la mejor alternativa de valor (Ganador de Serie, Hándicap de Mapas o Total Mapas) con certeza >= 75%."
     )
 
     try:
@@ -152,7 +153,11 @@ def ejecutar_escaneo():
     descartados_certeza = 0
 
     for p in partidos:
-        time.sleep(2)
+        if partidos_enviados >= MAX_PARTIDOS_ENVIAR:
+            print(f"Límite alcanzado ({MAX_PARTIDOS_ENVIAR} partidas). Deteniendo envíos.")
+            break
+
+        time.sleep(3)  # Pausa de 3 segundos para evitar error 503 por tasa de solicitudes
         analisis, estado = analizar_partido_esports_ia(p)
 
         if not analisis:
@@ -176,7 +181,7 @@ def ejecutar_escaneo():
         exito_envio = enviar_mensaje_telegram(msg)
         if exito_envio:
             partidos_enviados += 1
-            print(f"✅ Enviado a Telegram: {p['equipo_a']} vs {p['equipo_b']}")
+            print(f"✅ Enviado a Telegram ({partidos_enviados}/{MAX_PARTIDOS_ENVIAR}): {p['equipo_a']} vs {p['equipo_b']}")
 
     msg_resumen = f"<b>Escaneo eSports completado.</b> Pronósticos enviados: {partidos_enviados}"
     if partidos_enviados == 0 and descartados_certeza > 0:
