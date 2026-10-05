@@ -8,14 +8,14 @@ from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------
-# 1. CONFIGURACIÓN Y CREDENCIALES (ESPORTS)
+# 1. CONFIGURACIÓN Y CREDENCIALES (ESPORTS OPTIMIZADO BETPLAY)
 # ---------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PANDASCORE_API_KEY = os.getenv("PANDASCORE_TOKEN")
 
-UMBRAL_MINIMO_FILTRO = 75.0  # Elevado al 75% para mayor certeza
+UMBRAL_MINIMO_FILTRO = 75.0
 MAX_PARTIDOS_ENVIAR = 10
 ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 
@@ -30,10 +30,11 @@ JUEGOS_ESPORTS = [
 
 class AnalisisEsportsSchema(BaseModel):
     prob_pick_principal: float = Field(description="Probabilidad estimada opción principal (0 a 100)")
-    pick_principal: str = Field(description="Mercado principal recomendado (ej. Gana Equipo A, Map Handicap -1.5, Over 2.5 Mapas)")
+    pick_principal: str = Field(description="Mercado principal recomendado (ej. Gana Equipo A Moneyline, Map Handicap -1.5, Over 2.5 Mapas)")
+    regla_valor_betplay: str = Field(description="Instrucción de adaptación para BetPlay si no está la línea exacta (ej. 'Si en BetPlay no hay Hándicap, apostar Ganador Directo (Moneyline) si paga cuotas >= 1.50').")
     stake_principal: str = Field(description="Stake sugerido (ej. 3/5 o 4/5)")
     prob_cobertura: float = Field(description="Probabilidad estimada cobertura (0 a 100)")
-    pick_cobertura: str = Field(description="Opción de cobertura (ej. Hándicap Mapas +1.5)")
+    pick_cobertura: str = Field(description="Opción de cobertura accesible en BetPlay (ej. Ganador de Mapa 1)")
     analisis_tactico: str = Field(description="Justificación táctica en máx 2 oraciones basada en rendimiento de los últimos 10 días y map pool.")
 
 def enviar_mensaje_telegram(texto):
@@ -43,14 +44,14 @@ def enviar_mensaje_telegram(texto):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "HTML"}
     try:
-        res = requests.post(url, json=payload, timeout=10)
+        res = requests.post(url, json=payload, timeout=5)  # Timeout de seguridad de 5s
         return res.status_code == 200
     except Exception as e:
         print("Error enviando mensaje a Telegram:", e)
         return False
 
 # ---------------------------------------------------------
-# 2. INGESTA DE PARTIDOS ESPORTS (VENTANA MÓVIL 12 HORAS)
+# 2. INGESTA DE PARTIDOS ESPORTS (VENTANA MÓVIL 12 HORAS CON TIMEOUT)
 # ---------------------------------------------------------
 def obtener_partidos_esports():
     if not PANDASCORE_API_KEY:
@@ -58,7 +59,6 @@ def obtener_partidos_esports():
         return []
 
     lista_partidos = []
-    # Ventana móvil de 12 horas continuas desde este instante
     ahora_utc = datetime.now(timezone.utc)
     fin_ventana_utc = ahora_utc + timedelta(hours=12)
 
@@ -68,7 +68,8 @@ def obtener_partidos_esports():
         url = f"https://api.pandascore.co/{juego['slug']}/matches/upcoming"
         params = {"page[size]": 20, "sort": "begin_at"}
         try:
-            res = requests.get(url, headers=headers, params=params, timeout=10)
+            # timeout=5 de seguridad para evitar congelamiento si PandaScore frena la respuesta
+            res = requests.get(url, headers=headers, params=params, timeout=5)
             if res.status_code != 200:
                 print(f"Error {res.status_code} en PandaScore para {juego['nombre']}")
                 continue
@@ -81,7 +82,6 @@ def obtener_partidos_esports():
                 
                 dt_utc = datetime.fromisoformat(begin_raw.replace("Z", "+00:00"))
                 
-                # FILTRO MÓVIL: Solo partidas programadas dentro de las PRÓXIMAS 12 HORAS
                 if not (ahora_utc <= dt_utc <= fin_ventana_utc):
                     continue
 
@@ -102,7 +102,7 @@ def obtener_partidos_esports():
                     "equipo_b": equipo_b,
                     "formato": f"Bo{match_type}",
                     "fecha": dt_colombia.strftime("%Y-%m-%d"),
-                    "hora": dt_colombia.strftime("%I:%M %p")  # Formato 12 Horas
+                    "hora": dt_colombia.strftime("%I:%M %p")
                 })
             time.sleep(0.3)
         except Exception as e:
@@ -110,7 +110,7 @@ def obtener_partidos_esports():
     return lista_partidos
 
 # ---------------------------------------------------------
-# 3. EVALUACIÓN Y VALIDACIÓN CON IA (GEMINI 3.8)
+# 3. EVALUACIÓN Y VALIDACIÓN CON IA (GEMINI 3.8 + ADAPTACIÓN BETPLAY)
 # ---------------------------------------------------------
 def analizar_partido_esports_ia(partido):
     if not client_gemini:
@@ -119,8 +119,9 @@ def analizar_partido_esports_ia(partido):
     prompt = (
         f"Analiza el partido de eSports para las PRÓXIMAS 12 HORAS: {partido['equipo_a']} vs {partido['equipo_b']} ({partido['juego']} - {partido['torneo']}).\n"
         f"Formato de serie: {partido['formato']}.\n"
-        f"REGLA OBLIGATORIA: Restringe tu evaluación táctica al rendimiento, racha y estado de forma de los equipos/jugadores durante los ÚLTIMOS 10 DÍAS, adaptación al parche actual y map pool reciente.\n"
-        f"Establece en 'pick_principal' la mejor alternativa de valor (Ganador de Serie, Hándicap de Mapas o Total Mapas) con certeza >= {UMBRAL_MINIMO_FILTRO}%."
+        f"REGLA DE ADAPTACIÓN BETPLAY OBLIGATORIA: En 'regla_valor_betplay' explica la alternativa o el equivalente directo en BetPlay si la línea principal (ej. Hándicap de mapas o Totales) no está disponible en el mercado colombiano o si ajustó puntos.\n"
+        f"REGLA DE CONTEXTO RECIENTE: Restringe tu evaluación táctica al rendimiento, racha y estado de forma de los equipos/jugadores durante los ÚLTIMOS 10 DÍAS, adaptación al parche actual y map pool reciente.\n"
+        f"Establece en 'pick_principal' la mejor opción de valor con certeza >= {UMBRAL_MINIMO_FILTRO}%."
     )
 
     try:
@@ -156,7 +157,7 @@ def ejecutar_escaneo():
         print("Finalizado: Sin partidas eSports en la ventana de 12 horas.")
         return
 
-    enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP (PRÓXIMAS 12H)</b>\n<i>Escaneo: {fecha_hora_col}</i>")
+    enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP (BETPLAY READY)</b>\n<i>Escaneo: {fecha_hora_col}</i>")
     
     partidos_enviados = 0
     descartados_certeza = 0
@@ -166,7 +167,7 @@ def ejecutar_escaneo():
             print(f"Límite alcanzado ({MAX_PARTIDOS_ENVIAR} partidas). Deteniendo envíos.")
             break
 
-        time.sleep(2)
+        time.sleep(1.5)
         analisis, estado = analizar_partido_esports_ia(p)
 
         if not analisis:
@@ -182,6 +183,7 @@ def ejecutar_escaneo():
             f"⚔️ <b>{p['equipo_a']} vs {p['equipo_b']}</b> (<code>{p['formato']}</code>)\n"
             f"📅 <b>Fecha:</b> <code>{p['fecha']}</code> | ⏰ <b>Hora Col:</b> <code>{p['hora']}</code>\n\n"
             f"🎯 <b>APUESTA PRINCIPAL: {analisis['pick_principal']}</b>\n"
+            f"📲 <b>Regla de Valor BetPlay:</b> <i>{analisis['regla_valor_betplay']}</i>\n"
             f"📊 <b>Probabilidad:</b> <code>{analisis['prob_pick_principal']}%</code> | <b>Stake:</b> <code>{analisis['stake_principal']}</code>\n"
             f"💡 <i>[Gemini] {analisis['analisis_tactico']}</i>\n\n"
             f"🛡 <b>COBERTURA ALTERNATIVA:</b> {analisis['pick_cobertura']} (<code>{analisis['prob_cobertura']}%</code>)"
