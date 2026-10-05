@@ -2,8 +2,8 @@ name: Bot de Analisis eSports Prepartido
 
 on:
   schedule:
-    # 13:12 UTC -> 08:12 AM Hora Colombia
-    # 01:12 UTC -> 08:12 PM Hora Colombia (Cubre madrugada)
+    # 13:12 UTC -> 08:12 AM Hora Colombia (Bloque Día: 08:00 AM a 08:00 PM)
+    # 01:12 UTC -> 08:12 PM Hora Colombia (Bloque Noche/Madrugada: 08:00 PM a 08:00 AM)
     - cron: '12 13,1 * * *'
   workflow_dispatch:
 
