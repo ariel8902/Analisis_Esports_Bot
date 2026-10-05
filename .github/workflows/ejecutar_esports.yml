@@ -24,10 +24,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install google-genai requests pydantic
 
-      - name: Ejecutar motor eSports
+- name: Ejecutar motor eSports
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_TOKEN_ESPORTS }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID_ESPORTS }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PANDASCORE_TOKEN: ${{ secrets.PANDASCORE_TOKEN }}
         run: python analisis_esports_prepartido.py
