@@ -1,10 +1,11 @@
-importar sistema operativo
-importar json
-hora de importación
-solicitudes de importación
+import os
+import json
+import time
+import requests
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel, Field
-Importar genai desde Google
+from google import genai
+from google.genai import types
 
 # ---------------------------------------------------------
 # 1. CONFIGURACIÓN Y CREDENCIALES (ESPORTS)
@@ -14,177 +15,183 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PANDASCORE_API_KEY = os.getenv("PANDASCORE_TOKEN")
 
-UMBRAL_MINIMO_FILTRO = 75.0 # Elevado al 75% para mayor rentabilidad y precisión
-MAX_PARTIDOS_ENVIAR = 10 # Máximo de pronósticos por ejecución
-ZONA_HORARIA_COLOMBIA = zona horaria(timedelta(horas=-5))
+UMBRAL_MINIMO_FILTRO = 75.0  # Elevado al 75% para mayor certeza
+MAX_PARTIDOS_ENVIAR = 10
+ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 
 client_gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-MODELO_GEMINI = 'géminis-3.8-flash'
+MODELO_GEMINI = 'gemini-3.8-flash'
 
-# Slugs de PandaScore corregidos
 JUEGOS_ESPORTS = [
     {"nombre": "🎮 Counter-Strike 2", "slug": "csgo"},
     {"nombre": "⚔️ League of Legends", "slug": "lol"},
     {"nombre": "🛡️ Dota 2", "slug": "dota2"}
 ]
 
-clase AnalisisEsportsSchema(BaseModel):
+class AnalisisEsportsSchema(BaseModel):
     prob_pick_principal: float = Field(description="Probabilidad estimada opción principal (0 a 100)")
     pick_principal: str = Field(description="Mercado principal recomendado (ej. Gana Equipo A, Map Handicap -1.5, Over 2.5 Mapas)")
-    stake_principal: str = Campo(descripción="Stake sugerido (ej. 3/5 o 4/5)")
+    stake_principal: str = Field(description="Stake sugerido (ej. 3/5 o 4/5)")
     prob_cobertura: float = Field(description="Probabilidad estimada cobertura (0 a 100)")
     pick_cobertura: str = Field(description="Opción de cobertura (ej. Hándicap Mapas +1.5)")
     analisis_tactico: str = Field(description="Justificación táctica en máx 2 oraciones basada en rendimiento de los últimos 10 días y map pool.")
 
 def enviar_mensaje_telegram(texto):
-    si no es TELEGRAM_BOT_TOKEN o no es TELEGRAM_CHAT_ID:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Error: Credenciales de Telegram no configuradas.")
-        devolver Falso
+        return False
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "HTML"}
-    intentar:
+    try:
         res = requests.post(url, json=payload, timeout=10)
-        devolver res.status_code == 200
-    excepto Excepción como e:
+        return res.status_code == 200
+    except Exception as e:
         print("Error enviando mensaje a Telegram:", e)
-        devolver Falso
+        return False
 
 # ---------------------------------------------------------
-# 2. INGESTA DE PARTIDOS ESPORTS (PANDASCORE)
+# 2. INGESTA DE PARTIDOS ESPORTS (PANDASCORE - FILTRO HOY)
 # ---------------------------------------------------------
 def obtener_partidos_esports():
-    Si no existe PANDASCORE_API_KEY:
-        print("Error: PANDASCORE_API_KEY no está configurado.")
-        devolver []
+    if not PANDASCORE_API_KEY:
+        print("Error: PANDASCORE_TOKEN no está configurado.")
+        return []
 
     lista_partidos = []
-    ahora_utc = datetime.now(timezone.utc)
-    limite_jornada = ahora_utc + timedelta(horas=36)
+    ahora_colombia = datetime.now(ZONA_HORARIA_COLOMBIA)
+    fecha_hoy_str = ahora_colombia.strftime("%Y-%m-%d")
 
-    encabezados = {"Autorización": f"Portador {PANDASCORE_API_KEY}"}
+    headers = {"Authorization": f"Bearer {PANDASCORE_API_KEY}"}
 
-    para juego en JUEGOS_ESPORTS:
+    for juego in JUEGOS_ESPORTS:
         url = f"https://api.pandascore.co/{juego['slug']}/matches/upcoming"
-        parámetros = {"página[tamaño]": 10, "ordenar": "inicio_en"}
-        intentar:
+        params = {"page[size]": 15, "sort": "begin_at"}
+        try:
             res = requests.get(url, headers=headers, params=params, timeout=10)
-            Si res.status_code != 200:
+            if res.status_code != 200:
                 print(f"Error {res.status_code} en PandaScore para {juego['nombre']}")
-                continuar
+                continue
+            
             coincidencias = res.json()
-            para partido en partidos:
+            for match in coincidencias:
                 begin_raw = match.get("begin_at")
-                si no begin_raw:
-                    continuar
+                if not begin_raw:
+                    continue
+                
                 dt_utc = datetime.fromisoformat(begin_raw.replace("Z", "+00:00"))
-                si no (ahora_utc <= dt_utc <= limite_jornada):
-                    continuar
                 dt_colombia = dt_utc.astimezone(ZONA_HORARIA_COLOMBIA)
+                
+                # FILTRO ESTRICTO: Solo partidas del día de HOY en Hora Colombia
+                if dt_colombia.strftime("%Y-%m-%d") != fecha_hoy_str:
+                    continue
 
-                oponentes = match.get("oponentes", [])
-                Si len(oponentes) < 2:
-                    continuar
-
-                equipo_a = oponentes[0].get("oponente", {}).get("nombre", "Equipo A")
-                equipo_b = oponentes[1].get("oponente", {}).get("nombre", "Equipo B")
-                nombre_liga = partido.get("liga", {}).get("nombre", "Torneo eSports")
-                tipo_partido = partido.get("número_de_partidos", 3)
+                opponents = match.get("opponents", [])
+                if len(opponents) < 2:
+                    continue
+                
+                equipo_a = opponents[0].get("opponent", {}).get("name", "Equipo A")
+                equipo_b = opponents[1].get("opponent", {}).get("name", "Equipo B")
+                nombre_liga = match.get("league", {}).get("name", "Torneo eSports")
+                match_type = match.get("number_of_games", 3)
 
                 lista_partidos.append({
                     "juego": juego["nombre"],
-                    "torneo": nombre_de_la_liga,
+                    "torneo": nombre_liga,
                     "equipo_a": equipo_a,
                     "equipo_b": equipo_b,
                     "formato": f"Bo{match_type}",
                     "fecha": dt_colombia.strftime("%Y-%m-%d"),
-                    "hora": dt_colombia.strftime("%H:%M")
+                    "hora": dt_colombia.strftime("%I:%M %p") # Formato 12 Horas
                 })
-            tiempo.dormir(0.3)
-        excepto Excepción como e:
+            time.sleep(0.3)
+        except Exception as e:
             print(f"Error consultando {juego['nombre']}:", e)
-
-    devolver lista_partidos
+    return lista_partidos
 
 # ---------------------------------------------------------
-# 3. EVALUACIÓN Y VALIDACIÓN CON IA (GÉMINIS 3.8)
+# 3. EVALUACIÓN Y VALIDACIÓN CON IA (GEMINI 3.8)
 # ---------------------------------------------------------
 def analizar_partido_esports_ia(partido):
-    si no client_gemini:
-        return Ninguno, "IA no configurada"
+    if not client_gemini:
+        return None, "IA no configurada"
 
-    mensaje = (
-        f"Analiza el partido de eSports: {partido['equipo_a']} vs {partido['equipo_b']} ({partido['juego']} - {partido['torneo']}).\n"
+    prompt = (
+        f"Analiza el partido de eSports para HOY: {partido['equipo_a']} vs {partido['equipo_b']} ({partido['juego']} - {partido['torneo']}).\n"
         f"Formato de serie: {partido['formato']}.\n"
-        f"IMPORTANTE: Restringe tu evaluación táctica al rendimiento, racha y estado de forma de los equipos/jugadores durante los ÚLTIMOS 10 DÍAS, adaptación al parche actual y map pool reciente.\n"
-        f"Establece en 'pick_principal' la mejor alternativa de valor (Ganador de Serie, Hándicap de Mapas o Total Mapas) con certeza >= 75%."
+        f"REGLA OBLIGATORIA: Restringe tu evaluación táctica al rendimiento, racha y estado de forma de los equipos/jugadores durante los ÚLTIMOS 10 DÍAS, adaptación al parche actual y map pool reciente.\n"
+        f"Establece en 'pick_principal' la mejor alternativa de valor (Ganador de Serie, Hándicap de Mapas o Total Mapas) con certeza >= {UMBRAL_MINIMO_FILTRO}%."
     )
 
-    intentar:
+    try:
         res = client_gemini.models.generate_content(
-            modelo=MODELO_GEMINI,
-            contenido=prompt,
-            config={"response_mime_type": "application/json", "response_schema": AnalisisEsportsSchema}
+            model=MODELO_GEMINI,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=AnalisisEsportsSchema,
+                temperature=0.15
+            )
         )
-        si res y res.text:
+        if res and res.text:
             return json.loads(res.text), "OK"
-    excepto Excepción como e:
+    except Exception as e:
         print(f"Error evaluando {partido['equipo_a']} vs {partido['equipo_b']}: {e}")
-        devolver Ninguno, str(e)
+        return None, str(e)
 
-    Devuelve None, "ERROR_GENERAL"
+    return None, "ERROR_GENERAL"
 
 # ---------------------------------------------------------
 # 4. ORQUESTADOR PRINCIPAL
 # ---------------------------------------------------------
 def ejecutar_escaneo():
-    fecha_colombia = fechahora.now(ZONA_HORARIA_COLOMBIA).strftime("%Y-%m-%d")
-    print(f"Iniciando escaneo de eSports Prepartido: {fecha_colombia}")
+    fecha_colombia = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y-%m-%d")
+    print(f"Iniciando escaneo de eSports Prepartido (HOY): {fecha_colombia}")
     partidos = obtener_partidos_esports()
 
-    si no hay partidos:
-        msg = f"🎮 <b>REPORTE ESPORTS - {fecha_colombia}</b>\n\n<i>Sin partidas programadas en la ventana de las próximas 36 horas.</i>"
+    if not partidos:
+        msg = f"🎮 <b>REPORTE ESPORTS - {fecha_colombia}</b>\n\n<i>Sin partidas programadas para la jornada de hoy.</i>"
         enviar_mensaje_telegram(msg)
-        print("Finalizado: Sin partidas eSports en la ventana actual.")
-        devolver
+        print("Finalizado: Sin partidas eSports para hoy.")
+        return
 
     enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP</b> | Escaneo: <b>{fecha_colombia}</b>")
     
     partidos_enviados = 0
     descartados_certeza = 0
 
-    para p en partidos:
-        si partidos_enviados >= MAX_PARTIDOS_ENVIAR:
+    for p in partidos:
+        if partidos_enviados >= MAX_PARTIDOS_ENVIAR:
             print(f"Límite alcanzado ({MAX_PARTIDOS_ENVIAR} partidas). Deteniendo envíos.")
-            romper
+            break
 
-        time.sleep(3) # Pausa de 3 segundos para evitar el error 503 por tasa de solicitudes
+        time.sleep(2)
         analisis, estado = analizar_partido_esports_ia(p)
 
-        si no análisis:
-            continuar
+        if not analisis:
+            continue
 
-        prob_max = max(analisis.get("prob_pick_principal", 0), analis.get("prob_cobertura", 0))
-        si prob_max < UMBRAL_MINIMO_FILTRO:
+        prob_max = max(analisis.get("prob_pick_principal", 0), analisis.get("prob_cobertura", 0))
+        if prob_max < UMBRAL_MINIMO_FILTRO:
             descartados_certeza += 1
-            continuar
+            continue
 
-        mensaje = (
+        msg = (
             f"{p['juego']} | <b>{p['torneo']}</b>\n"
             f"⚔️ <b>{p['equipo_a']} vs {p['equipo_b']}</b> (<code>{p['formato']}</code>)\n"
-            f"📅 <b>Fecha:</b> <code>{p['fecha']}</code> | ⏰ <b>Hora:</b> <code>{p['hora']}</code>\n\n"
+            f"📅 <b>Fecha:</b> <code>{p['fecha']}</code> | ⏰ <b>Hora Col:</b> <code>{p['hora']}</code>\n\n"
             f"🎯 <b>APUESTA PRINCIPAL: {analisis['pick_principal']}</b>\n"
             f"📊 <b>Probabilidad:</b> <code>{analisis['prob_pick_principal']}%</code> | <b>Stake:</b> <code>{analisis['stake_principal']}</code>\n"
-            f"💡 <i>[Géminis] {análisis['análisis_táctico']}</i>\n\n"
+            f"💡 <i>[Gemini] {analisis['analisis_tactico']}</i>\n\n"
             f"🛡 <b>COBERTURA ALTERNATIVA:</b> {analisis['pick_cobertura']} (<code>{analisis['prob_cobertura']}%</code>)"
         )
         
         exito_envio = enviar_mensaje_telegram(msg)
-        si exito_envio:
+        if exito_envio:
             partidos_enviados += 1
             print(f"✅ Enviado a Telegram ({partidos_enviados}/{MAX_PARTIDOS_ENVIAR}): {p['equipo_a']} vs {p['equipo_b']}")
 
     msg_resumen = f"<b>Escaneo eSports completado.</b> Pronósticos enviados: {partidos_enviados}"
-    si partidos_enviados == 0 y descartados_certeza > 0:
+    if partidos_enviados == 0 and descartados_certeza > 0:
         msg_resumen += f"\n\n<b>Detalle:</b> {descartados_certeza} partida(s) analizadas no alcanzaron el {UMBRAL_MINIMO_FILTRO}% de certeza."
 
     enviar_mensaje_telegram(msg_resumen)
