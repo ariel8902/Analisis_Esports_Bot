@@ -50,7 +50,7 @@ def enviar_mensaje_telegram(texto):
         return False
 
 # ---------------------------------------------------------
-# 2. INGESTA DE PARTIDOS ESPORTS (PANDASCORE - FILTRO HOY)
+# 2. INGESTA DE PARTIDOS ESPORTS (VENTANA MÓVIL 12 HORAS)
 # ---------------------------------------------------------
 def obtener_partidos_esports():
     if not PANDASCORE_API_KEY:
@@ -58,14 +58,15 @@ def obtener_partidos_esports():
         return []
 
     lista_partidos = []
-    ahora_colombia = datetime.now(ZONA_HORARIA_COLOMBIA)
-    fecha_hoy_str = ahora_colombia.strftime("%Y-%m-%d")
+    # Ventana móvil de 12 horas continuas desde este instante
+    ahora_utc = datetime.now(timezone.utc)
+    fin_ventana_utc = ahora_utc + timedelta(hours=12)
 
     headers = {"Authorization": f"Bearer {PANDASCORE_API_KEY}"}
 
     for juego in JUEGOS_ESPORTS:
         url = f"https://api.pandascore.co/{juego['slug']}/matches/upcoming"
-        params = {"page[size]": 15, "sort": "begin_at"}
+        params = {"page[size]": 20, "sort": "begin_at"}
         try:
             res = requests.get(url, headers=headers, params=params, timeout=10)
             if res.status_code != 200:
@@ -79,12 +80,12 @@ def obtener_partidos_esports():
                     continue
                 
                 dt_utc = datetime.fromisoformat(begin_raw.replace("Z", "+00:00"))
-                dt_colombia = dt_utc.astimezone(ZONA_HORARIA_COLOMBIA)
                 
-                # FILTRO ESTRICTO: Solo partidas del día de HOY en Hora Colombia
-                if dt_colombia.strftime("%Y-%m-%d") != fecha_hoy_str:
+                # FILTRO MÓVIL: Solo partidas programadas dentro de las PRÓXIMAS 12 HORAS
+                if not (ahora_utc <= dt_utc <= fin_ventana_utc):
                     continue
 
+                dt_colombia = dt_utc.astimezone(ZONA_HORARIA_COLOMBIA)
                 opponents = match.get("opponents", [])
                 if len(opponents) < 2:
                     continue
@@ -101,7 +102,7 @@ def obtener_partidos_esports():
                     "equipo_b": equipo_b,
                     "formato": f"Bo{match_type}",
                     "fecha": dt_colombia.strftime("%Y-%m-%d"),
-                    "hora": dt_colombia.strftime("%I:%M %p") # Formato 12 Horas
+                    "hora": dt_colombia.strftime("%I:%M %p")  # Formato 12 Horas
                 })
             time.sleep(0.3)
         except Exception as e:
@@ -116,7 +117,7 @@ def analizar_partido_esports_ia(partido):
         return None, "IA no configurada"
 
     prompt = (
-        f"Analiza el partido de eSports para HOY: {partido['equipo_a']} vs {partido['equipo_b']} ({partido['juego']} - {partido['torneo']}).\n"
+        f"Analiza el partido de eSports para las PRÓXIMAS 12 HORAS: {partido['equipo_a']} vs {partido['equipo_b']} ({partido['juego']} - {partido['torneo']}).\n"
         f"Formato de serie: {partido['formato']}.\n"
         f"REGLA OBLIGATORIA: Restringe tu evaluación táctica al rendimiento, racha y estado de forma de los equipos/jugadores durante los ÚLTIMOS 10 DÍAS, adaptación al parche actual y map pool reciente.\n"
         f"Establece en 'pick_principal' la mejor alternativa de valor (Ganador de Serie, Hándicap de Mapas o Total Mapas) con certeza >= {UMBRAL_MINIMO_FILTRO}%."
@@ -144,17 +145,18 @@ def analizar_partido_esports_ia(partido):
 # 4. ORQUESTADOR PRINCIPAL
 # ---------------------------------------------------------
 def ejecutar_escaneo():
-    fecha_colombia = datetime.now(ZONA_HORARIA_COLOMBIA).strftime("%Y-%m-%d")
-    print(f"Iniciando escaneo de eSports Prepartido (HOY): {fecha_colombia}")
+    ahora_colombia = datetime.now(ZONA_HORARIA_COLOMBIA)
+    fecha_hora_col = ahora_colombia.strftime("%Y-%m-%d %I:%M %p")
+    print(f"Iniciando escaneo de eSports Prepartido (Próximas 12 Horas): {fecha_hora_col}")
     partidos = obtener_partidos_esports()
 
     if not partidos:
-        msg = f"🎮 <b>REPORTE ESPORTS - {fecha_colombia}</b>\n\n<i>Sin partidas programadas para la jornada de hoy.</i>"
+        msg = f"🎮 <b>REPORTE ESPORTS</b>\n<i>Escaneo: {fecha_hora_col}</i>\n\n<i>Sin partidas programadas para las próximas 12 horas.</i>"
         enviar_mensaje_telegram(msg)
-        print("Finalizado: Sin partidas eSports para hoy.")
+        print("Finalizado: Sin partidas eSports en la ventana de 12 horas.")
         return
 
-    enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP</b> | Escaneo: <b>{fecha_colombia}</b>")
+    enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP (PRÓXIMAS 12H)</b>\n<i>Escaneo: {fecha_hora_col}</i>")
     
     partidos_enviados = 0
     descartados_certeza = 0
