@@ -10,7 +10,7 @@ on:
 jobs:
   analisis_esports:
     runs-on: ubuntu-latest
-    timeout-minutes: 5  # <-- Límite de seguridad: Cancela automáticamente si supera los 5 min
+    timeout-minutes: 5  # <-- Cancela la ejecución automáticamente a los 5 minutos
     steps:
       - name: Descargar Código
         uses: actions/checkout@v4
