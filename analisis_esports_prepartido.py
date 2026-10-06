@@ -8,10 +8,10 @@ from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------
-# 1. CONFIGURACIÓN Y CREDENCIALES (ESPORTS OPTIMIZADO BETPLAY)
+# 1. CONFIGURACIÓN Y CREDENCIALES (ESPORTS REFINADO)
 # ---------------------------------------------------------
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_ESPORTS") or os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID_ESPORTS") or os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PANDASCORE_API_KEY = os.getenv("PANDASCORE_TOKEN")
 
@@ -30,12 +30,12 @@ JUEGOS_ESPORTS = [
 
 class AnalisisEsportsSchema(BaseModel):
     prob_pick_principal: float = Field(description="Probabilidad estimada opción principal (0 a 100)")
-    pick_principal: str = Field(description="Mercado principal recomendado (ej. Gana Equipo A Moneyline, Map Handicap -1.5, Over 2.5 Mapas)")
-    regla_valor_betplay: str = Field(description="Instrucción de adaptación para BetPlay si no está la línea exacta (ej. 'Si en BetPlay no hay Hándicap, apostar Ganador Directo (Moneyline) si paga cuotas >= 1.50').")
+    pick_principal: str = Field(description="Mercado principal recomendado (ej. Gana Equipo A Moneyline, Map Handicap +1.5, Over 2.5 Mapas)")
+    regla_valor_betplay: str = Field(description="Instrucción de adaptación para BetPlay si no está la línea exacta o si la cuota movió puntos.")
     stake_principal: str = Field(description="Stake sugerido (ej. 3/5 o 4/5)")
     prob_cobertura: float = Field(description="Probabilidad estimada cobertura (0 a 100)")
     pick_cobertura: str = Field(description="Opción de cobertura accesible en BetPlay (ej. Ganador de Mapa 1)")
-    analisis_tactico: str = Field(description="Justificación táctica en máx 2 oraciones basada en rendimiento de los últimos 10 días y map pool.")
+    analisis_tactico: str = Field(description="Justificación táctica basada en rendimiento de los últimos 10 días, adaptación al parche y explicación de cuota.")
 
 def enviar_mensaje_telegram(texto):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -51,7 +51,7 @@ def enviar_mensaje_telegram(texto):
         return False
 
 # ---------------------------------------------------------
-# 2. INGESTA DE PARTIDOS ESPORTS (VENTANA MÓVIL 12 HORAS CON TIMEOUT)
+# 2. INGESTA DE PARTIDOS ESPORTS (VENTANA 12H CON TIMEOUT)
 # ---------------------------------------------------------
 def obtener_partidos_esports():
     if not PANDASCORE_API_KEY:
@@ -68,7 +68,6 @@ def obtener_partidos_esports():
         url = f"https://api.pandascore.co/{juego['slug']}/matches/upcoming"
         params = {"page[size]": 20, "sort": "begin_at"}
         try:
-            # timeout=5 de seguridad para evitar congelamiento si PandaScore frena la respuesta
             res = requests.get(url, headers=headers, params=params, timeout=5)
             if res.status_code != 200:
                 print(f"Error {res.status_code} en PandaScore para {juego['nombre']}")
@@ -110,7 +109,7 @@ def obtener_partidos_esports():
     return lista_partidos
 
 # ---------------------------------------------------------
-# 3. EVALUACIÓN Y VALIDACIÓN CON IA (GEMINI 3.8 + ADAPTACIÓN BETPLAY)
+# 3. EVALUACIÓN Y VALIDACIÓN CON IA (GEMINI 3.8 + PRUDENCIA)
 # ---------------------------------------------------------
 def analizar_partido_esports_ia(partido):
     if not client_gemini:
@@ -119,8 +118,9 @@ def analizar_partido_esports_ia(partido):
     prompt = (
         f"Analiza el partido de eSports para las PRÓXIMAS 12 HORAS: {partido['equipo_a']} vs {partido['equipo_b']} ({partido['juego']} - {partido['torneo']}).\n"
         f"Formato de serie: {partido['formato']}.\n"
-        f"REGLA DE ADAPTACIÓN BETPLAY OBLIGATORIA: En 'regla_valor_betplay' explica la alternativa o el equivalente directo en BetPlay si la línea principal (ej. Hándicap de mapas o Totales) no está disponible en el mercado colombiano o si ajustó puntos.\n"
-        f"REGLA DE CONTEXTO RECIENTE: Restringe tu evaluación táctica al rendimiento, racha y estado de forma de los equipos/jugadores durante los ÚLTIMOS 10 DÍAS, adaptación al parche actual y map pool reciente.\n"
+        f"REGLA DE CONTEXTO RECIENTE: Restringe tu evaluación táctica al rendimiento, racha y estado de forma de los equipos durante los ÚLTIMOS 10 DÍAS, adaptación al parche actual y map pool reciente.\n"
+        f"REGLA DE PRUDENCIA EN UNDERDOGS: Si detectas valor en un equipo no favorito (cuota alta), prioriza sugerir Hándicap de Mapas (+1.5) en lugar de victoria directa, y explica brevemente por qué la casa sobreestima al favorito.\n"
+        f"REGLA BETPLAY: En 'regla_valor_betplay' explica cómo adaptar el pick si BetPlay no ofrece la línea exacta.\n"
         f"Establece en 'pick_principal' la mejor opción de valor con certeza >= {UMBRAL_MINIMO_FILTRO}%."
     )
 
