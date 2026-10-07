@@ -8,14 +8,14 @@ from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------
-# 1. CONFIGURACIÓN Y CREDENCIALES (ESPORTS REFINADO)
+# 1. CONFIGURACIÓN Y CREDENCIALES (ESPORTS - REFORZADO 80%)
 # ---------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN_ESPORTS") or os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID_ESPORTS") or os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PANDASCORE_API_KEY = os.getenv("PANDASCORE_TOKEN")
 
-UMBRAL_MINIMO_FILTRO = 75.0
+UMBRAL_MINIMO_FILTRO = 80.0  # <-- EXIGENCIA ELEVADA AL 80% PARA FILTRAR VARIANZA
 MAX_PARTIDOS_ENVIAR = 10
 ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 
@@ -44,15 +44,12 @@ def enviar_mensaje_telegram(texto):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "HTML"}
     try:
-        res = requests.post(url, json=payload, timeout=5)  # Timeout de seguridad de 5s
+        res = requests.post(url, json=payload, timeout=5)
         return res.status_code == 200
     except Exception as e:
         print("Error enviando mensaje a Telegram:", e)
         return False
 
-# ---------------------------------------------------------
-# 2. INGESTA DE PARTIDOS ESPORTS (VENTANA 12H CON TIMEOUT)
-# ---------------------------------------------------------
 def obtener_partidos_esports():
     if not PANDASCORE_API_KEY:
         print("Error: PANDASCORE_TOKEN no está configurado.")
@@ -70,7 +67,6 @@ def obtener_partidos_esports():
         try:
             res = requests.get(url, headers=headers, params=params, timeout=5)
             if res.status_code != 200:
-                print(f"Error {res.status_code} en PandaScore para {juego['nombre']}")
                 continue
             
             coincidencias = res.json()
@@ -108,9 +104,6 @@ def obtener_partidos_esports():
             print(f"Error consultando {juego['nombre']}:", e)
     return lista_partidos
 
-# ---------------------------------------------------------
-# 3. EVALUACIÓN Y VALIDACIÓN CON IA (GEMINI 3.8 + PRUDENCIA)
-# ---------------------------------------------------------
 def analizar_partido_esports_ia(partido):
     if not client_gemini:
         return None, "IA no configurada"
@@ -118,10 +111,9 @@ def analizar_partido_esports_ia(partido):
     prompt = (
         f"Analiza el partido de eSports para las PRÓXIMAS 12 HORAS: {partido['equipo_a']} vs {partido['equipo_b']} ({partido['juego']} - {partido['torneo']}).\n"
         f"Formato de serie: {partido['formato']}.\n"
-        f"REGLA DE CONTEXTO RECIENTE: Restringe tu evaluación táctica al rendimiento, racha y estado de forma de los equipos durante los ÚLTIMOS 10 DÍAS, adaptación al parche actual y map pool reciente.\n"
-        f"REGLA DE PRUDENCIA EN UNDERDOGS: Si detectas valor en un equipo no favorito (cuota alta), prioriza sugerir Hándicap de Mapas (+1.5) en lugar de victoria directa, y explica brevemente por qué la casa sobreestima al favorito.\n"
+        f"REGLA DE EXIGENCIA ELEVADA: Sé muy estricto con la racha reciente (últimos 10 días). Prioriza Hándicaps de Mapas (+1.5) si el favorito muestra la menor duda.\n"
         f"REGLA BETPLAY: En 'regla_valor_betplay' explica cómo adaptar el pick si BetPlay no ofrece la línea exacta.\n"
-        f"Establece en 'pick_principal' la mejor opción de valor con certeza >= {UMBRAL_MINIMO_FILTRO}%."
+        f"Establece en 'pick_principal' la mejor opción con certeza SOLO SI es >= {UMBRAL_MINIMO_FILTRO}%."
     )
 
     try:
@@ -131,7 +123,7 @@ def analizar_partido_esports_ia(partido):
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=AnalisisEsportsSchema,
-                temperature=0.15
+                temperature=0.10
             )
         )
         if res and res.text:
@@ -142,29 +134,24 @@ def analizar_partido_esports_ia(partido):
 
     return None, "ERROR_GENERAL"
 
-# ---------------------------------------------------------
-# 4. ORQUESTADOR PRINCIPAL
-# ---------------------------------------------------------
 def ejecutar_escaneo():
     ahora_colombia = datetime.now(ZONA_HORARIA_COLOMBIA)
     fecha_hora_col = ahora_colombia.strftime("%Y-%m-%d %I:%M %p")
-    print(f"Iniciando escaneo de eSports Prepartido (Próximas 12 Horas): {fecha_hora_col}")
+    print(f"Iniciando escaneo de eSports (Filtro 80%): {fecha_hora_col}")
     partidos = obtener_partidos_esports()
 
     if not partidos:
         msg = f"🎮 <b>REPORTE ESPORTS</b>\n<i>Escaneo: {fecha_hora_col}</i>\n\n<i>Sin partidas programadas para las próximas 12 horas.</i>"
         enviar_mensaje_telegram(msg)
-        print("Finalizado: Sin partidas eSports en la ventana de 12 horas.")
         return
 
-    enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP (BETPLAY READY)</b>\n<i>Escaneo: {fecha_hora_col}</i>")
+    enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP (FILTRO REFORZADO 80%)</b>\n<i>Escaneo: {fecha_hora_col}</i>")
     
     partidos_enviados = 0
     descartados_certeza = 0
 
     for p in partidos:
         if partidos_enviados >= MAX_PARTIDOS_ENVIAR:
-            print(f"Límite alcanzado ({MAX_PARTIDOS_ENVIAR} partidas). Deteniendo envíos.")
             break
 
         time.sleep(1.5)
@@ -196,10 +183,9 @@ def ejecutar_escaneo():
 
     msg_resumen = f"<b>Escaneo eSports completado.</b> Pronósticos enviados: {partidos_enviados}"
     if partidos_enviados == 0 and descartados_certeza > 0:
-        msg_resumen += f"\n\n<b>Detalle:</b> {descartados_certeza} partida(s) analizadas no alcanzaron el {UMBRAL_MINIMO_FILTRO}% de certeza."
+        msg_resumen += f"\n\n<b>Detalle:</b> {descartados_certeza} partida(s) analizadas descartadas por no alcanzar el {UMBRAL_MINIMO_FILTRO}% de certeza."
 
     enviar_mensaje_telegram(msg_resumen)
-    print(f"Proceso eSports completado. Enviados: {partidos_enviados}")
 
 if __name__ == "__main__":
     ejecutar_escaneo()
