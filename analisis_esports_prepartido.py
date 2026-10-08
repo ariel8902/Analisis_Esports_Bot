@@ -13,7 +13,9 @@ from google.genai import types
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-PANDASCORE_API_KEY = os.getenv("PANDASCORE_API_KEY")
+
+# LECTURA COMPATIBLE CON CUALQUIER NOMBRE DE SECRET PREVIO EN GITHUB
+PANDASCORE_API_KEY = os.getenv("PANDASCORE_API_KEY") or os.getenv("PANDASCORE_KEY") or os.getenv("PANDASCORE_TOKEN")
 
 UMBRAL_MINIMO_FILTRO = 75.0
 PISO_MINIMO_CUOTA = 1.40  # CANDADO DE RENTABILIDAD INVIOLABLE
@@ -31,7 +33,7 @@ class AnalisisEsportsSchema(BaseModel):
     stake_principal: str = Field(description="Stake sugerido según certeza (ej. 3/5 o 4/5)")
     prob_cobertura: float = Field(description="Probabilidad estimada opción de cobertura (0 a 100)")
     pick_cobertura: str = Field(description="Opción de cobertura accesible en BetPlay")
-    analisis_tactico: str = Field(description="Justificación basada en triangulación de vetos de mapas, sustitutos (stand-ins) y rendimiento reciente de los últimos 10 días en máx 2 oraciones.")
+    analisis_tactico: str = Field(description="Justificación basada en triangulación de vetos de mapas, sustitutos (stand-ins) y rendimiento reciente en máx 2 oraciones.")
 
 def enviar_mensaje_telegram(texto):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -53,7 +55,7 @@ def enviar_mensaje_telegram(texto):
 
 def obtener_partidos_esports():
     if not PANDASCORE_API_KEY:
-        print("Error: PANDASCORE_API_KEY no configurada.")
+        print("Error: PANDASCORE_API_KEY / PANDASCORE_KEY no está configurada en los Secrets de GitHub.")
         return []
 
     lista_partidos = []
@@ -116,7 +118,7 @@ def analizar_partido_esports_ia(p):
     try:
         res_search = client_gemini.models.generate_content(
             model=MODELO_GEMINI,
-            contents=f"Busca sustitutos (stand-ins), cambios de roster de última hora y resultados de los últimos 10 días para: {query_noticias}",
+            contents=f"Busca sustitutos (stand-ins), cambios de roster de última hora y resultados recientes para: {query_noticias}",
             config=types.GenerateContentConfig(
                 tools=[{"google_search": {}}]
             )
