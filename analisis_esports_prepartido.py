@@ -23,6 +23,10 @@ ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 client_gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 MODELO_GEMINI = 'gemini-3.8-flash'
 
+# FILTRO EXPLÍCITO DE DISCIPLINAS Y TORNEOS HABILITADOS EN BETPLAY
+JUEGOS_PERMITIDOS = ["Counter-Strike", "CS:GO", "CS2", "League of Legends", "Dota 2", "Valorant", "Rainbow Six", "eSports Football", "eSports Basketball"]
+KEYWORDS_TORNEOS_BETPLAY = ["esl", "cct", "european", "mesa", "united21", "stk", "nodwin", "blast", "worlds", "lec", "lck", "vct", "prime"]
+
 class AnalisisEsportsSchema(BaseModel):
     prob_pick_principal: float = Field(description="Probabilidad estimada final para la opción principal (0 a 100)")
     pick_principal: str = Field(description="Mercado comercial accesible en BetPlay (ej. Ganador de la Serie ML, Handicap de Mapas -1.5, Total Over 2.5)")
@@ -47,6 +51,10 @@ def enviar_mensaje_telegram(texto):
         print("Error enviando mensaje a Telegram:", e)
         return False
 
+def es_torneo_betplay(torneo_nombre):
+    nombre_lc = torneo_nombre.lower()
+    return any(kw in nombre_lc for kw in KEYWORDS_TORNEOS_BETPLAY)
+
 def obtener_partidos_esports():
     if not PANDASCORE_API_KEY:
         print("Error: PANDASCORE_API_KEY no configurada.")
@@ -58,7 +66,7 @@ def obtener_partidos_esports():
 
     url = "https://api.pandascore.co/matches/upcoming"
     headers = {"Authorization": f"Bearer {PANDASCORE_API_KEY}"}
-    params = {"page[size]": 15, "sort": "begin_at"}
+    params = {"page[size]": 30, "sort": "begin_at"}
 
     try:
         res = requests.get(url, headers=headers, params=params, timeout=8)
@@ -75,22 +83,31 @@ def obtener_partidos_esports():
             if not (ahora_utc <= dt_utc <= fin_ventana_utc):
                 continue
 
+            videogame = m.get("videogame", {}).get("name", "")
+            # Filtro por juego operable
+            if not any(j.lower() in videogame.lower() for j in JUEGOS_PERMITIDOS):
+                continue
+
+            league_name = m.get("league", {}).get("name", "")
+            serie_name = m.get("serie", {}).get("full_name", "")
+            torneo_completo = f"{league_name} - {serie_name}".strip(" -")
+
+            # Filtro por torneos que realmente publica BetPlay
+            if not es_torneo_betplay(torneo_completo):
+                continue
+
             opponents = m.get("opponents", [])
             if len(opponents) < 2:
                 continue
 
             t1 = opponents[0].get("opponent", {}).get("name", "Team 1")
             t2 = opponents[1].get("opponent", {}).get("name", "Team 2")
-            videogame = m.get("videogame", {}).get("name", "eSports")
-            league_name = m.get("league", {}).get("name", "")
-            serie_name = m.get("serie", {}).get("full_name", "")
             match_type = f"Bo{m.get('number_of_games', 3)}"
-
             dt_colombia = dt_utc.astimezone(ZONA_HORARIA_COLOMBIA)
 
             lista_partidos.append({
                 "juego": videogame,
-                "torneo": f"{league_name} - {serie_name}".strip(" -"),
+                "torneo": torneo_completo,
                 "equipo1": t1,
                 "equipo2": t2,
                 "formato": match_type,
@@ -162,11 +179,11 @@ def analizar_partido_esports_ia(p, noticias_globales):
 def ejecutar_escaneo():
     ahora_colombia = datetime.now(ZONA_HORARIA_COLOMBIA)
     fecha_hora_col = ahora_colombia.strftime("%Y-%m-%d %I:%M %p")
-    print(f"Iniciando escaneo optimizado de eSports: {fecha_hora_col}")
+    print(f"Iniciando escaneo optimizado de eSports (Filtro BetPlay): {fecha_hora_col}")
     partidos = obtener_partidos_esports()
 
     if not partidos:
-        msg = f"🎮 <b>REPORTE ESPORTS</b>\n<i>Escaneo: {fecha_hora_col}</i>\n\n<i>Sin partidos programados para las próximas 12 horas.</i>"
+        msg = f"🎮 <b>REPORTE ESPORTS</b>\n<i>Escaneo: {fecha_hora_col}</i>\n\n<i>Sin partidos de torneos habilitados en BetPlay para las próximas 12 horas.</i>"
         enviar_mensaje_telegram(msg)
         return
 
