@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------
-# 1. CONFIGURACIÓN Y CREDENCIALES (ESPORTS - TRIANGULACIÓN REAL)
+# 1. CONFIGURACIÓN Y CREDENCIALES
 # ---------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -17,7 +17,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PANDASCORE_API_KEY = os.getenv("PANDASCORE_API_KEY") or os.getenv("PANDASCORE_KEY") or os.getenv("PANDASCORE_TOKEN")
 
 UMBRAL_MINIMO_FILTRO = 75.0
-PISO_MINIMO_CUOTA = 1.40  # CANDADO DE RENTABILIDAD INVIOLABLE
+PISO_MINIMO_CUOTA = 1.40  # CANDADO DE RENTABILIDAD
 ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 
 client_gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
@@ -25,14 +25,14 @@ MODELO_GEMINI = 'gemini-3.8-flash'
 
 class AnalisisEsportsSchema(BaseModel):
     prob_pick_principal: float = Field(description="Probabilidad estimada final para la opción principal (0 a 100)")
-    pick_principal: str = Field(description="Mercado principal comercial en BetPlay (ej. Ganador de la Serie ML, Handicap de Mapas -1.5, Total de Mapas Over 2.5)")
-    cuota_estimada_pick: float = Field(description="Cuota decimal estimada en BetPlay (DEBE SER >= 1.40).")
+    pick_principal: str = Field(description="Mercado comercial accesible en BetPlay (ej. Ganador de la Serie ML, Handicap de Mapas -1.5, Total Over 2.5)")
+    cuota_estimada_pick: float = Field(description="Piso de cuota exigido en BetPlay (DEBE SER >= 1.40).")
     margen_operatividad_universal: str = Field(description="Instrucción del rango de cuota/línea de mapas aceptable en BetPlay y cuándo ABSTENERSE.")
     regla_valor_betplay: str = Field(description="Instrucción de cuota mínima en BetPlay. Exige abstenerse si cae de 1.40.")
     stake_principal: str = Field(description="Stake sugerido según certeza (ej. 3/5 o 4/5)")
     prob_cobertura: float = Field(description="Probabilidad estimada opción de cobertura (0 a 100)")
     pick_cobertura: str = Field(description="Opción de cobertura accesible en BetPlay")
-    analisis_tactico: str = Field(description="Justificación basada en triangulación de vetos de mapas, sustitutos (stand-ins) y rendimiento reciente en máx 2 oraciones.")
+    analisis_tactico: str = Field(description="Justificación basada en triangulación de sustitutos (stand-ins) y mapas en máx 2 oraciones.")
 
 def enviar_mensaje_telegram(texto):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -108,21 +108,19 @@ def rastrear_noticias_globales(partidos):
     if not client_gemini or not partidos:
         return "Sin noticias web previas."
 
-    resumen_partidos = "\n".join([f"- {p['juego']}: {p['equipo1']} vs {p['equipo2']} ({p['fecha']})" for p in partidos])
-    prompt_search = f"Busca novedades oficiales de sustitutos (stand-ins), cambios de roster y noticias recientes para estos partidos de eSports:\n{resumen_partidos}"
+    resumen = "\n".join([f"- {p['juego']}: {p['equipo1']} vs {p['equipo2']} ({p['fecha']})" for p in partidos])
+    prompt_search = f"Busca novedades oficiales de sustitutos (stand-ins), cambios de roster de última hora y resultados recientes para:\n{resumen}"
 
     try:
         res = client_gemini.models.generate_content(
             model=MODELO_GEMINI,
             contents=prompt_search,
-            config=types.GenerateContentConfig(
-                tools=[{"google_search": {}}]
-            )
+            config=types.GenerateContentConfig(tools=[{"google_search": {}}])
         )
         if res and res.text:
             return res.text
     except Exception as e:
-        print("Advertencia en rastreo global de noticias:", e)
+        print("Advertencia en rastreo global:", e)
 
     return "Información técnica estándar basada en torneos y formatos."
 
@@ -137,11 +135,10 @@ def analizar_partido_esports_ia(p, noticias_globales):
         f"   - Formato: {p['formato']}\n\n"
         f"2. NOTICIAS EN VIVO Y RASTREO WEB CONSOLIDADO:\n"
         f"   {noticias_globales}\n\n"
-        f"REGLAS DE TRIANGULACIÓN STRICTA (CERO COMPLACENCIAS):\n"
-        f"A. Cruza las noticias (sustitutos, rendimiento) con cuotas reales de BetPlay. Si hay un suplente o duda táctica, reduce la probabilidad < 75%.\n"
-        f"B. CANDADO PISO DE CUOTA: La opción sugerida DEBE TENER 'cuota_estimada_pick' >= {PISO_MINIMO_CUOTA}. PROHIBIDO cuotas < 1.40.\n"
-        f"C. MARGEN DE OPERATIVIDAD UNIVERSAL: Especifica el rango de cuota/línea de mapas aceptable en BetPlay y cuándo ABSTENERSE.\n"
-        f"D. Si la certeza calculada es menor al {UMBRAL_MINIMO_FILTRO}%, descarta el partido inmediatamente."
+        f"REGLAS DE TRIANGULACIÓN INVIOLABLES:\n"
+        f"A. CANDADO PISO DE CUOTA: La 'cuota_estimada_pick' DEBE SER OBLIGATORIAMENTE >= {PISO_MINIMO_CUOTA}. PROHIBIDO cuotas < 1.40.\n"
+        f"B. Cruza las noticias (sustitutos, rendimiento) con la opción sugerida. Si hay un suplente o duda táctica, asigna probabilidad < 75%.\n"
+        f"C. Si la certeza calculada es menor al {UMBRAL_MINIMO_FILTRO}%, descarta el partido inmediatamente."
     )
 
     try:
@@ -173,15 +170,12 @@ def ejecutar_escaneo():
         enviar_mensaje_telegram(msg)
         return
 
-    # PASO 1: UN SOLO RASTREO WEB GLOBAL
     noticias_globales = rastrear_noticias_globales(partidos)
-
     enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP (TRIANGULACIÓN REAL)</b>\n<i>Escaneo: {fecha_hora_col}</i>")
     
     partidos_enviados = 0
     descartados_certeza = 0
 
-    # PASO 2: EVALUACIÓN ESTRUCTURADA
     for p in partidos:
         analisis, estado = analizar_partido_esports_ia(p, noticias_globales)
 
@@ -191,7 +185,7 @@ def ejecutar_escaneo():
         prob_max = max(analisis.get("prob_pick_principal", 0), analisis.get("prob_cobertura", 0))
         cuota_pick = analisis.get("cuota_estimada_pick", 0.0)
 
-        # CANDADO DE RENTABILIDAD Y CERTEZA
+        # CANDADO DURO EN PYTHON
         if prob_max < UMBRAL_MINIMO_FILTRO or cuota_pick < PISO_MINIMO_CUOTA:
             descartados_certeza += 1
             print(f"⛔ Bloqueado {p['equipo1']} vs {p['equipo2']} (Prob: {prob_max}%, Cuota: {cuota_pick})")
@@ -212,11 +206,10 @@ def ejecutar_escaneo():
         exito_envio = enviar_mensaje_telegram(msg)
         if exito_envio:
             partidos_enviados += 1
-            print(f"✅ Enviado a Telegram: {p['equipo1']} vs {p['equipo2']}")
 
     msg_resumen = f"<b>Escaneo eSports completado.</b> Pronósticos rentables enviados: {partidos_enviados}"
     if descartados_certeza > 0:
-        msg_resumen += f"\n\n<b>Detalle:</b> {descartados_certeza} partido(s) descartados por no superar la triangulación (< 75% certeza o cuota < 1.40)."
+        msg_resumen += f"\n\n<b>Detalle:</b> {descartados_certeza} partido(s) descartados por triangulación o cuota < 1.40."
 
     enviar_mensaje_telegram(msg_resumen)
 
