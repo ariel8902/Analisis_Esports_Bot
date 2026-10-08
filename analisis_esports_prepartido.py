@@ -14,7 +14,6 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# LECTURA COMPATIBLE CON CUALQUIER NOMBRE DE SECRET PREVIO EN GITHUB
 PANDASCORE_API_KEY = os.getenv("PANDASCORE_API_KEY") or os.getenv("PANDASCORE_KEY") or os.getenv("PANDASCORE_TOKEN")
 
 UMBRAL_MINIMO_FILTRO = 75.0
@@ -46,7 +45,7 @@ def enviar_mensaje_telegram(texto):
         if res.status_code == 200:
             return True
         else:
-            time.sleep(2)
+            time.sleep(1)
             res_retry = requests.post(url, json=payload, timeout=5)
             return res_retry.status_code == 200
     except Exception as e:
@@ -55,7 +54,7 @@ def enviar_mensaje_telegram(texto):
 
 def obtener_partidos_esports():
     if not PANDASCORE_API_KEY:
-        print("Error: PANDASCORE_API_KEY / PANDASCORE_KEY no está configurada en los Secrets de GitHub.")
+        print("Error: PANDASCORE_API_KEY no configurada.")
         return []
 
     lista_partidos = []
@@ -64,10 +63,10 @@ def obtener_partidos_esports():
 
     url = "https://api.pandascore.co/matches/upcoming"
     headers = {"Authorization": f"Bearer {PANDASCORE_API_KEY}"}
-    params = {"page[size]": 50, "sort": "begin_at"}
+    params = {"page[size]": 20, "sort": "begin_at"}
 
     try:
-        res = requests.get(url, headers=headers, params=params, timeout=10)
+        res = requests.get(url, headers=headers, params=params, timeout=8)
         if res.status_code != 200:
             return []
         
@@ -103,6 +102,8 @@ def obtener_partidos_esports():
                 "fecha": dt_colombia.strftime("%Y-%m-%d"),
                 "hora": dt_colombia.strftime("%I:%M %p")
             })
+            if len(lista_partidos) >= 10:  # LÍMITE DE PROTECCIÓN DE TIEMPO
+                break
     except Exception as e:
         print("Error consultando PandaScore:", e)
 
@@ -112,7 +113,7 @@ def analizar_partido_esports_ia(p):
     if not client_gemini:
         return None, "IA no configurada"
 
-    # PASO 1: BÚSQUEDA WEB EN VIVO (GROUNDING - HLTV / LIQUIPEDIA / SUSTITUTOS)
+    # PASO 1: BÚSQUEDA WEB EN VIVO (GROUNDING CON TIMEOUT DE PROTECCIÓN)
     query_noticias = f"{p['juego']} {p['equipo1']} vs {p['equipo2']} roster stand-in news Liquipedia HLTV {p['fecha']}"
     noticias_obtenidas = ""
     try:
@@ -126,8 +127,8 @@ def analizar_partido_esports_ia(p):
         if res_search and res_search.text:
             noticias_obtenidas = res_search.text
     except Exception as e:
-        print(f"Advertencia en rastreo web para {p['equipo1']} vs {p['equipo2']}: {e}")
-        noticias_obtenidas = "No se pudieron obtener noticias en vivo. Evaluar únicamente con datos del torneo y formato."
+        print(f"Rastreo web omitido por tiempo en {p['equipo1']} vs {p['equipo2']}: {e}")
+        noticias_obtenidas = "Evaluación estándar por datos de torneo."
 
     # PASO 2: ESTRUCTURACIÓN Y TRIANGULACIÓN CERRADA
     prompt_triangulacion = (
@@ -140,7 +141,7 @@ def analizar_partido_esports_ia(p):
         f"REGLAS DE TRIANGULACIÓN STRICTA (CERO COMPLACENCIAS):\n"
         f"A. Cruza las noticias reales del Paso 1 (sustitutos, rendimiento de mapas) con las cuotas reales de BetPlay. Si hay un jugador suplente (stand-in) o duda táctica, reduce la probabilidad por debajo del 75%.\n"
         f"B. CANDADO PISO DE CUOTA: La opción sugerida DEBE TENER 'cuota_estimada_pick' >= {PISO_MINIMO_CUOTA}. Queda ESTRICTAMENTE PROHIBIDO sugerir cuotas menores a 1.40.\n"
-        f"C. MARGEN DE OPERATIVIDAD UNIVERSAL: Especifica el rango de cuota/línea de mapas aceptable en BetPlay y exactamente cuándo ABSTENERSE por pérdida de valor.\n"
+        f"C. MARGEN DE OPERATIVIDAD UNIVERSAL: Especifica el rango de cuota/línea de mapas aceptable en BetPlay y cuándo ABSTENERSE por pérdida de valor.\n"
         f"D. Si la certeza calculada es menor al {UMBRAL_MINIMO_FILTRO}%, descarta el partido inmediatamente."
     )
 
@@ -179,7 +180,7 @@ def ejecutar_escaneo():
     descartados_certeza = 0
 
     for p in partidos:
-        time.sleep(1.5)
+        time.sleep(0.5)
         analisis, estado = analizar_partido_esports_ia(p)
 
         if not analisis:
@@ -212,7 +213,7 @@ def ejecutar_escaneo():
             print(f"✅ Enviado a Telegram: {p['equipo1']} vs {p['equipo2']}")
 
     msg_resumen = f"<b>Escaneo eSports completado.</b> Pronósticos rentables enviados: {partidos_enviados}"
-    if partidos_enviados == 0 and descartados_certeza > 0:
+    if descartados_certeza > 0:
         msg_resumen += f"\n\n<b>Detalle:</b> {descartados_certeza} partido(s) descartados por no superar la triangulación (< 75% certeza o cuota < 1.40)."
 
     enviar_mensaje_telegram(msg_resumen)
