@@ -42,12 +42,7 @@ def enviar_mensaje_telegram(texto):
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": texto, "parse_mode": "HTML"}
     try:
         res = requests.post(url, json=payload, timeout=5)
-        if res.status_code == 200:
-            return True
-        else:
-            time.sleep(1)
-            res_retry = requests.post(url, json=payload, timeout=5)
-            return res_retry.status_code == 200
+        return res.status_code == 200
     except Exception as e:
         print("Error enviando mensaje a Telegram:", e)
         return False
@@ -63,7 +58,7 @@ def obtener_partidos_esports():
 
     url = "https://api.pandascore.co/matches/upcoming"
     headers = {"Authorization": f"Bearer {PANDASCORE_API_KEY}"}
-    params = {"page[size]": 20, "sort": "begin_at"}
+    params = {"page[size]": 15, "sort": "begin_at"}
 
     try:
         res = requests.get(url, headers=headers, params=params, timeout=8)
@@ -102,46 +97,50 @@ def obtener_partidos_esports():
                 "fecha": dt_colombia.strftime("%Y-%m-%d"),
                 "hora": dt_colombia.strftime("%I:%M %p")
             })
-            if len(lista_partidos) >= 10:  # LÍMITE DE PROTECCIÓN DE TIEMPO
+            if len(lista_partidos) >= 8:
                 break
     except Exception as e:
         print("Error consultando PandaScore:", e)
 
     return lista_partidos
 
-def analizar_partido_esports_ia(p):
-    if not client_gemini:
-        return None, "IA no configurada"
+def rastrear_noticias_globales(partidos):
+    if not client_gemini or not partidos:
+        return "Sin noticias web previas."
 
-    # PASO 1: BÚSQUEDA WEB EN VIVO (GROUNDING CON TIMEOUT DE PROTECCIÓN)
-    query_noticias = f"{p['juego']} {p['equipo1']} vs {p['equipo2']} roster stand-in news Liquipedia HLTV {p['fecha']}"
-    noticias_obtenidas = ""
+    resumen_partidos = "\n".join([f"- {p['juego']}: {p['equipo1']} vs {p['equipo2']} ({p['fecha']})" for p in partidos])
+    prompt_search = f"Busca novedades oficiales de sustitutos (stand-ins), cambios de roster y noticias recientes para estos partidos de eSports:\n{resumen_partidos}"
+
     try:
-        res_search = client_gemini.models.generate_content(
+        res = client_gemini.models.generate_content(
             model=MODELO_GEMINI,
-            contents=f"Busca sustitutos (stand-ins), cambios de roster de última hora y resultados recientes para: {query_noticias}",
+            contents=prompt_search,
             config=types.GenerateContentConfig(
                 tools=[{"google_search": {}}]
             )
         )
-        if res_search and res_search.text:
-            noticias_obtenidas = res_search.text
+        if res and res.text:
+            return res.text
     except Exception as e:
-        print(f"Rastreo web omitido por tiempo en {p['equipo1']} vs {p['equipo2']}: {e}")
-        noticias_obtenidas = "Evaluación estándar por datos de torneo."
+        print("Advertencia en rastreo global de noticias:", e)
 
-    # PASO 2: ESTRUCTURACIÓN Y TRIANGULACIÓN CERRADA
+    return "Información técnica estándar basada en torneos y formatos."
+
+def analizar_partido_esports_ia(p, noticias_globales):
+    if not client_gemini:
+        return None, "IA no configurada"
+
     prompt_triangulacion = (
-        f"EVALUACIÓN DE TRIANGULACIÓN OBLIGATORIA DE ESPORTS ({p['equipo1']} vs {p['equipo2']} - {p['juego']} {p['formato']}):\n\n"
-        f"1. DATOS DE PROGRAMACIÓN Y TORNEO:\n"
+        f"EVALUACIÓN DE TRIANGULACIÓN DE ESPORTS ({p['equipo1']} vs {p['equipo2']} - {p['juego']} {p['formato']}):\n\n"
+        f"1. PROGRAMACIÓN Y TORNEO:\n"
         f"   - Torneo: {p['torneo']}\n"
         f"   - Formato: {p['formato']}\n\n"
-        f"2. NOTICIAS EN VIVO Y RASTREO WEB (PASO 1):\n"
-        f"   {noticias_obtenidas}\n\n"
+        f"2. NOTICIAS EN VIVO Y RASTREO WEB CONSOLIDADO:\n"
+        f"   {noticias_globales}\n\n"
         f"REGLAS DE TRIANGULACIÓN STRICTA (CERO COMPLACENCIAS):\n"
-        f"A. Cruza las noticias reales del Paso 1 (sustitutos, rendimiento de mapas) con las cuotas reales de BetPlay. Si hay un jugador suplente (stand-in) o duda táctica, reduce la probabilidad por debajo del 75%.\n"
-        f"B. CANDADO PISO DE CUOTA: La opción sugerida DEBE TENER 'cuota_estimada_pick' >= {PISO_MINIMO_CUOTA}. Queda ESTRICTAMENTE PROHIBIDO sugerir cuotas menores a 1.40.\n"
-        f"C. MARGEN DE OPERATIVIDAD UNIVERSAL: Especifica el rango de cuota/línea de mapas aceptable en BetPlay y cuándo ABSTENERSE por pérdida de valor.\n"
+        f"A. Cruza las noticias (sustitutos, rendimiento) con cuotas reales de BetPlay. Si hay un suplente o duda táctica, reduce la probabilidad < 75%.\n"
+        f"B. CANDADO PISO DE CUOTA: La opción sugerida DEBE TENER 'cuota_estimada_pick' >= {PISO_MINIMO_CUOTA}. PROHIBIDO cuotas < 1.40.\n"
+        f"C. MARGEN DE OPERATIVIDAD UNIVERSAL: Especifica el rango de cuota/línea de mapas aceptable en BetPlay y cuándo ABSTENERSE.\n"
         f"D. Si la certeza calculada es menor al {UMBRAL_MINIMO_FILTRO}%, descarta el partido inmediatamente."
     )
 
@@ -166,7 +165,7 @@ def analizar_partido_esports_ia(p):
 def ejecutar_escaneo():
     ahora_colombia = datetime.now(ZONA_HORARIA_COLOMBIA)
     fecha_hora_col = ahora_colombia.strftime("%Y-%m-%d %I:%M %p")
-    print(f"Iniciando escaneo de eSports (Triangulación + Grounding + Piso 1.40): {fecha_hora_col}")
+    print(f"Iniciando escaneo optimizado de eSports: {fecha_hora_col}")
     partidos = obtener_partidos_esports()
 
     if not partidos:
@@ -174,14 +173,17 @@ def ejecutar_escaneo():
         enviar_mensaje_telegram(msg)
         return
 
+    # PASO 1: UN SOLO RASTREO WEB GLOBAL
+    noticias_globales = rastrear_noticias_globales(partidos)
+
     enviar_mensaje_telegram(f"🎮 <b>PRONÓSTICOS ESPORTS VIP (TRIANGULACIÓN REAL)</b>\n<i>Escaneo: {fecha_hora_col}</i>")
     
     partidos_enviados = 0
     descartados_certeza = 0
 
+    # PASO 2: EVALUACIÓN ESTRUCTURADA
     for p in partidos:
-        time.sleep(0.5)
-        analisis, estado = analizar_partido_esports_ia(p)
+        analisis, estado = analizar_partido_esports_ia(p, noticias_globales)
 
         if not analisis:
             continue
