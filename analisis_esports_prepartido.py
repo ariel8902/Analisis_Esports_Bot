@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 
 # ---------------------------------------------------------
-# 1. CONFIGURACIÓN Y CREDENCIALES
+# 1. CONFIGURACIÓN Y CREDENCIALES (ESPORTS STRICTO MONEYLINE)
 # ---------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
@@ -17,26 +17,25 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PANDASCORE_API_KEY = os.getenv("PANDASCORE_API_KEY") or os.getenv("PANDASCORE_KEY") or os.getenv("PANDASCORE_TOKEN")
 
 UMBRAL_MINIMO_FILTRO = 75.0
-PISO_MINIMO_CUOTA = 1.40  # CANDADO DE RENTABILIDAD
+PISO_MINIMO_CUOTA = 1.40  # CANDADO DE RENTABILIDAD INVIOLABLE
 ZONA_HORARIA_COLOMBIA = timezone(timedelta(hours=-5))
 
 client_gemini = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 MODELO_GEMINI = 'gemini-3.8-flash'
 
-# FILTRO EXPLÍCITO DE DISCIPLINAS Y TORNEOS HABILITADOS EN BETPLAY
-JUEGOS_PERMITIDOS = ["Counter-Strike", "CS:GO", "CS2", "League of Legends", "Dota 2", "Valorant", "Rainbow Six", "eSports Football", "eSports Basketball"]
-KEYWORDS_TORNEOS_BETPLAY = ["esl", "cct", "european", "mesa", "united21", "stk", "nodwin", "blast", "worlds", "lec", "lck", "vct", "prime"]
+JUEGOS_PERMITIDOS = ["Counter-Strike", "CS:GO", "CS2", "League of Legends", "Dota 2", "Valorant", "Rainbow Six"]
+KEYWORDS_TORNEOS_BETPLAY = ["esl", "cct", "european", "mesa", "united21", "stk", "nodwin", "blast", "worlds", "lec", "lck", "vct"]
 
 class AnalisisEsportsSchema(BaseModel):
     prob_pick_principal: float = Field(description="Probabilidad estimada final para la opción principal (0 a 100)")
-    pick_principal: str = Field(description="Mercado comercial accesible en BetPlay (ej. Ganador de la Serie ML, Handicap de Mapas -1.5, Total Over 2.5)")
-    cuota_estimada_pick: float = Field(description="Piso de cuota exigido en BetPlay (DEBE SER >= 1.40).")
-    margen_operatividad_universal: str = Field(description="Instrucción del rango de cuota/línea de mapas aceptable en BetPlay y cuándo ABSTENERSE.")
+    pick_principal: str = Field(description="Opcion Ganador de la Serie ML comercial en BetPlay (ej. Ganador del Encuentro - Team Name)")
+    cuota_estimada_pick: float = Field(description="Cuota decimal del mercado Ganador ML (DEBE SER >= 1.40).")
+    margen_operatividad_universal: str = Field(description="Instrucción del rango de cuota aceptable en BetPlay y cuándo ABSTENERSE.")
     regla_valor_betplay: str = Field(description="Instrucción de cuota mínima en BetPlay. Exige abstenerse si cae de 1.40.")
     stake_principal: str = Field(description="Stake sugerido según certeza (ej. 3/5 o 4/5)")
     prob_cobertura: float = Field(description="Probabilidad estimada opción de cobertura (0 a 100)")
-    pick_cobertura: str = Field(description="Opción de cobertura accesible en BetPlay")
-    analisis_tactico: str = Field(description="Justificación basada en triangulación de sustitutos (stand-ins) y mapas en máx 2 oraciones.")
+    pick_cobertura: str = Field(description="Opción de cobertura comercial (ej. Total de Mapas Más de 2.5 o Gana 1 Mapa)")
+    analisis_tactico: str = Field(description="Justificación basada en triangulación de sustitutos (stand-ins) y map-pool en máx 2 oraciones.")
 
 def enviar_mensaje_telegram(texto):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -84,7 +83,6 @@ def obtener_partidos_esports():
                 continue
 
             videogame = m.get("videogame", {}).get("name", "")
-            # Filtro por juego operable
             if not any(j.lower() in videogame.lower() for j in JUEGOS_PERMITIDOS):
                 continue
 
@@ -92,7 +90,6 @@ def obtener_partidos_esports():
             serie_name = m.get("serie", {}).get("full_name", "")
             torneo_completo = f"{league_name} - {serie_name}".strip(" -")
 
-            # Filtro por torneos que realmente publica BetPlay
             if not es_torneo_betplay(torneo_completo):
                 continue
 
@@ -126,7 +123,7 @@ def rastrear_noticias_globales(partidos):
         return "Sin noticias web previas."
 
     resumen = "\n".join([f"- {p['juego']}: {p['equipo1']} vs {p['equipo2']} ({p['fecha']})" for p in partidos])
-    prompt_search = f"Busca novedades oficiales de sustitutos (stand-ins), cambios de roster de última hora y resultados recientes para:\n{resumen}"
+    prompt_search = f"Busca novedades oficiales de sustitutos (stand-ins), cambios de roster de última hora y cuotas de ganador directo para:\n{resumen}"
 
     try:
         res = client_gemini.models.generate_content(
@@ -152,10 +149,11 @@ def analizar_partido_esports_ia(p, noticias_globales):
         f"   - Formato: {p['formato']}\n\n"
         f"2. NOTICIAS EN VIVO Y RASTREO WEB CONSOLIDADO:\n"
         f"   {noticias_globales}\n\n"
-        f"REGLAS DE TRIANGULACIÓN INVIOLABLES:\n"
-        f"A. CANDADO PISO DE CUOTA: La 'cuota_estimada_pick' DEBE SER OBLIGATORIAMENTE >= {PISO_MINIMO_CUOTA}. PROHIBIDO cuotas < 1.40.\n"
-        f"B. Cruza las noticias (sustitutos, rendimiento) con la opción sugerida. Si hay un suplente o duda táctica, asigna probabilidad < 75%.\n"
-        f"C. Si la certeza calculada es menor al {UMBRAL_MINIMO_FILTRO}%, descarta el partido inmediatamente."
+        f"REGLAS DE TRIANGULACIÓN STRICTA (SOLO GANADOR DIRECTO / MONEYLINE):\n"
+        f"A. EVALÚA EXCLUSIVAMENTE EL MERCADO DE GANADOR DEL ENCUENTRO (MONEYLINE ML). Queda ESTRICTAMENTE PROHIBIDO sugerir Hándicaps de Mapas no verificados.\n"
+        f"B. CANDADO PISO DE CUOTA: La 'cuota_estimada_pick' del Ganador ML DEBE SER OBLIGATORIAMENTE >= {PISO_MINIMO_CUOTA}. PROHIBIDO sugerir selecciones con cuotas < 1.40.\n"
+        f"C. Cruza las noticias (sustitutos, rendimiento) con la opción sugerida. Si hay un suplente o duda táctica, asigna probabilidad < 75%.\n"
+        f"D. Si la certeza calculada es menor al {UMBRAL_MINIMO_FILTRO}%, descarta el partido inmediatamente."
     )
 
     try:
@@ -179,7 +177,7 @@ def analizar_partido_esports_ia(p, noticias_globales):
 def ejecutar_escaneo():
     ahora_colombia = datetime.now(ZONA_HORARIA_COLOMBIA)
     fecha_hora_col = ahora_colombia.strftime("%Y-%m-%d %I:%M %p")
-    print(f"Iniciando escaneo optimizado de eSports (Filtro BetPlay): {fecha_hora_col}")
+    print(f"Iniciando escaneo eSports (Estricto Moneyline ML + Piso 1.40): {fecha_hora_col}")
     partidos = obtener_partidos_esports()
 
     if not partidos:
@@ -202,7 +200,7 @@ def ejecutar_escaneo():
         prob_max = max(analisis.get("prob_pick_principal", 0), analisis.get("prob_cobertura", 0))
         cuota_pick = analisis.get("cuota_estimada_pick", 0.0)
 
-        # CANDADO DURO EN PYTHON
+        # CANDADO DURO EN PYTHON: Si la probabilidad < 75% o la cuota real/estimada es < 1.40, descarta de raíz
         if prob_max < UMBRAL_MINIMO_FILTRO or cuota_pick < PISO_MINIMO_CUOTA:
             descartados_certeza += 1
             print(f"⛔ Bloqueado {p['equipo1']} vs {p['equipo2']} (Prob: {prob_max}%, Cuota: {cuota_pick})")
